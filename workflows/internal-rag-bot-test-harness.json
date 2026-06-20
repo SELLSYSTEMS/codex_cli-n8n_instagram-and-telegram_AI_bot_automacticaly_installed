@@ -1,0 +1,276 @@
+{
+  "name": "Internal: RAG Bot Test Harness",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "Internal bot-brain test workflow. This workflow is separate from Instagram and Telegram. It should never send external channel messages. Use it to validate Supabase RAG, OpenAI response generation, logging, and escalation silence behavior.",
+        "height": 220,
+        "width": 460,
+        "color": 4
+      },
+      "id": "sticky-internal-overview",
+      "name": "Sticky Note - Internal Test Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-720, -260]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "internal-rag-test",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "internal-test-webhook",
+      "name": "Internal Test Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-720, 80],
+      "notes": "POST JSON: {\"message\":\"...\",\"thread_id\":\"local-test-001\",\"tenant_id\":\"demo\"}. Include header x-internal-test-token matching INTERNAL_TEST_TOKEN if this workflow is activated."
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst headers = $json.headers || {};\nconst configuredToken = String($env.INTERNAL_TEST_TOKEN || '');\nconst providedToken = String(headers['x-internal-test-token'] || headers['X-Internal-Test-Token'] || body.internal_test_token || '');\nconst authorized = configuredToken.length >= 24 && providedToken === configuredToken;\nreturn [{ json: {\n  authorized,\n  tenant_id: body.tenant_id || $env.DEFAULT_TENANT_ID || 'demo',\n  channel: 'internal_test',\n  thread_id: body.thread_id || body.thread || `internal-${Date.now()}`,\n  message_text: body.message || body.text || '',\n  reset: body.reset === true || body.action === 'reset',\n  received_at: new Date().toISOString(),\n  raw_request: body\n}}];"
+      },
+      "id": "normalize-internal-test",
+      "name": "Normalize Internal Test Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 80],
+      "notes": "Normalizes a channel-free test request. Uses channel=internal_test so test state does not mutate production Instagram threads."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "authorized-internal-test",
+              "leftValue": "={{$json.authorized ? 'yes' : 'no'}}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-authorized-internal-test",
+      "name": "Is Authorized Internal Test",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-240, 80],
+      "notes": "Security gate for the optional public webhook. If INTERNAL_TEST_TOKEN is missing or the request token does not match, the workflow stops before OpenAI or Supabase work."
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: false, status: 'unauthorized', message: 'Set INTERNAL_TEST_TOKEN in n8n and pass it as x-internal-test-token.' } }];"
+      },
+      "id": "return-unauthorized",
+      "name": "Return Unauthorized",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 240],
+      "notes": "Terminal branch. No external calls are made."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/rpc/get_thread_state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { p_tenant_id: $json.tenant_id, p_channel: $json.channel, p_thread_id: $json.thread_id } }}",
+        "options": {}
+      },
+      "id": "internal-get-thread-state",
+      "name": "Get Internal Thread State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, -40],
+      "notes": "Reads escalation state for channel=internal_test. Escalated threads should not repeat handoff replies."
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Normalize Internal Test Request').first().json;\nconst state = $json || {};\nif (req.reset) {\n  return [{ json: { ...req, thread_state: state, reset_requested: true, should_process: false, silent: false } }];\n}\nconst silent = state.status === 'escalated' && state.silence_after_escalation !== false;\nreturn [{ json: { ...req, thread_state: state, reset_requested: false, should_process: !silent, silent } }];"
+      },
+      "id": "internal-build-state-decision",
+      "name": "Build State Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, -40],
+      "notes": "Converts thread state into either process, reset, or silent terminal behavior."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "can-process-internal-test",
+              "leftValue": "={{$json.should_process ? 'process' : ($json.reset_requested ? 'reset' : 'silent')}}",
+              "rightValue": "process",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "internal-process-gate",
+      "name": "Internal Process Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, -40],
+      "notes": "True branch continues to RAG. False branch returns silent/reset instructions."
+    },
+    {
+      "parameters": {
+        "jsCode": "if ($json.reset_requested) {\n  return [{ json: { ok: true, status: 'reset_requested', message: 'Use the local CLI or Supabase RPC reset_thread_escalation to reset this thread.', thread_id: $json.thread_id, channel: $json.channel } }];\n}\nreturn [{ json: { ok: true, status: 'silent_already_escalated', response: null, thread_id: $json.thread_id, channel: $json.channel, reset_hint: `select public.reset_thread_escalation('${$json.tenant_id}', '${$json.channel}', '${$json.thread_id}', 'operator', 'handoff complete');` } }];"
+      },
+      "id": "return-silent-or-reset",
+      "name": "Return Silent Or Reset Hint",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 160],
+      "notes": "Terminal no-send branch for already-escalated internal test threads."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{$env.OPENAI_API_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small', input: $json.message_text } }}",
+        "options": {}
+      },
+      "id": "internal-create-query-embedding",
+      "name": "Create Internal Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, -120],
+      "notes": "Creates the query embedding for Supabase pgvector retrieval."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/rpc/match_documents",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}" },
+            { "name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { p_tenant_id: $('Normalize Internal Test Request').first().json.tenant_id, query_embedding: $json.data[0].embedding, match_count: Number($env.SUPABASE_MATCH_COUNT || 5), min_similarity: Number($env.SUPABASE_MIN_SIMILARITY || 0.1) } }}",
+        "options": {}
+      },
+      "id": "internal-match-documents",
+      "name": "Match Internal Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, -120],
+      "notes": "Retrieves private company memory from native Supabase pgvector. No local vector store and no S3/AWS vector wrapper."
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Normalize Internal Test Request').first().json;\nconst docs = Array.isArray($json) ? $json : [$json];\nconst confidence = docs.reduce((max, row) => Math.max(max, Number(row.similarity || 0)), 0);\nconst context = docs.map((row, i) => `Source ${i + 1}: ${row.source_key || row.id}\\n${row.chunk_text || ''}`).join('\\n\\n---\\n\\n');\nreturn [{ json: { ...req, docs, confidence, context } }];"
+      },
+      "id": "internal-build-prompt-context",
+      "name": "Build Internal Prompt Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, -120],
+      "notes": "Builds a compact prompt context and confidence score from retrieved chunks."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{$env.OPENAI_API_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $env.OPENAI_CHAT_MODEL || $env.OPENAI_MODEL || 'gpt-4o-mini', temperature: 0.2, messages: [ { role: 'system', content: 'You are the internal channel-free test harness for the company Instagram DM assistant. Answer from retrieved company context. If unsupported or sensitive, say a human operator should review it.' }, { role: 'user', content: 'Retrieved context:\n' + $json.context + '\n\nIncoming message:\n' + $json.message_text } ] } }}",
+        "options": {}
+      },
+      "id": "internal-generate-reply",
+      "name": "Generate Internal Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, -120],
+      "notes": "Generates a response without sending it to any external channel."
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Build Internal Prompt Context').first().json;\nconst response = $json.choices?.[0]?.message?.content || '';\nreturn [{ json: { ok: true, status: 'answered', tenant_id: req.tenant_id, channel: req.channel, thread_id: req.thread_id, confidence: req.confidence, response, matched_sources: req.docs.map((row) => ({ source_key: row.source_key, similarity: row.similarity })) } }];"
+      },
+      "id": "return-internal-answer",
+      "name": "Return Internal Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, -120],
+      "notes": "Terminal response for internal n8n webhook callers."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Internal Test Webhook": { "main": [[{ "node": "Normalize Internal Test Request", "type": "main", "index": 0 }]] },
+    "Normalize Internal Test Request": { "main": [[{ "node": "Is Authorized Internal Test", "type": "main", "index": 0 }]] },
+    "Is Authorized Internal Test": { "main": [[{ "node": "Get Internal Thread State", "type": "main", "index": 0 }], [{ "node": "Return Unauthorized", "type": "main", "index": 0 }]] },
+    "Get Internal Thread State": { "main": [[{ "node": "Build State Decision", "type": "main", "index": 0 }]] },
+    "Build State Decision": { "main": [[{ "node": "Internal Process Gate", "type": "main", "index": 0 }]] },
+    "Internal Process Gate": { "main": [[{ "node": "Create Internal Query Embedding", "type": "main", "index": 0 }], [{ "node": "Return Silent Or Reset Hint", "type": "main", "index": 0 }]] },
+    "Create Internal Query Embedding": { "main": [[{ "node": "Match Internal Documents", "type": "main", "index": 0 }]] },
+    "Match Internal Documents": { "main": [[{ "node": "Build Internal Prompt Context", "type": "main", "index": 0 }]] },
+    "Build Internal Prompt Context": { "main": [[{ "node": "Generate Internal Reply", "type": "main", "index": 0 }]] },
+    "Generate Internal Reply": { "main": [[{ "node": "Return Internal Answer", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "internal-rag-bot-test-harness-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

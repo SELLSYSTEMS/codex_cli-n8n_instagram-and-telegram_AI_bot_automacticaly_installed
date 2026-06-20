@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+*.log
+node_modules/
+dist/
+.DS_Store
+.obsidian/
+
+# Local-only AI/operator memory. Do not publish.
+local-obsidian-memory/

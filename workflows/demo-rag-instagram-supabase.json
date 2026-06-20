@@ -1,0 +1,1610 @@
+{
+  "name": "Demo: RAG in n8n",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "instagram-webhook",
+        "httpMethod": [
+          "GET"
+        ],
+        "multipleMethods": false,
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "instagram-webhook-verification",
+      "name": "Instagram Webhook Verification",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        -260
+      ],
+      "webhookId": "instagram-webhook-verification"
+    },
+    {
+      "id": "webhook_instagram_1",
+      "name": "Instagram Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        360
+      ],
+      "parameters": {
+        "path": "instagram-webhook",
+        "httpMethod": [
+          "POST"
+        ],
+        "multipleMethods": false,
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "notes": "Production Instagram webhook receiver. Production executions appear in n8n Executions, not as visible test canvas data.",
+      "notesInFlow": true
+    },
+    {
+      "id": "normalize_event_1",
+      "name": "Normalize Instagram Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        360
+      ],
+      "parameters": {
+        "jsCode": "const envelope = $json || {};\nconst body = envelope.body && typeof envelope.body === 'object' ? envelope.body : envelope;\nconst entries = Array.isArray(body.entry) ? body.entry : [];\nconst configuredBusinessId = String($env[\"IG_INSTAGRAM_BUSINESS_ACCOUNT_ID\"] || '').trim();\n\nfunction asText(value) {\n  if (typeof value === 'string') return value;\n  if (value && typeof value.body === 'string') return value.body;\n  if (value && typeof value.text === 'string') return value.text;\n  return '';\n}\n\nfunction normalizeCandidate(candidate) {\n  const entry = candidate.entry || {};\n  const event = candidate.event || {};\n  const value = candidate.value || {};\n  const message = candidate.message || event.message || {};\n  const sender = event.sender || message.from || value.sender || {};\n  const recipient = event.recipient || value.recipient || {};\n  const entryId = String(entry.id || '').trim();\n  const senderId = String(sender.id || sender.user_ref || message.from?.id || '').trim();\n  const recipientId = String(recipient.id || value.metadata?.id || entryId || '').trim();\n  const businessId = configuredBusinessId || recipientId || entryId;\n  const isOutboundEcho = Boolean(configuredBusinessId && senderId === configuredBusinessId);\n  const messageId = String(message.mid || message.id || event.message?.mid || event.message?.id || '').trim();\n  const messageText = asText(message.text || event.message?.text || message).trim();\n  const timestamp = event.timestamp || entry.time || value.timestamp || Date.now();\n  const threadId = isOutboundEcho && recipientId ? recipientId : senderId || entryId;\n\n  return {\n    tenant_id: $env[\"DEFAULT_TENANT_ID\"] || 'demo',\n    channel: 'instagram',\n    event_type: 'instagram_message',\n    source_object: body.object || 'instagram',\n    ig_business_account_id: businessId,\n    instagram_sender_id: senderId,\n    instagram_recipient_id: recipientId,\n    instagram_thread_id: threadId,\n    thread_id: threadId,\n    instagram_message_id: messageId,\n    message_id: messageId,\n    message_text: messageText,\n    message_type: messageText ? 'text' : 'unknown',\n    event_timestamp: timestamp,\n    raw_event: body,\n    is_outbound_echo: isOutboundEcho,\n    is_instagram_message: Boolean(senderId && messageText),\n    is_valid_message: Boolean(senderId && messageText),\n  };\n}\n\nconst candidates = [];\nfor (const entry of entries) {\n  if (Array.isArray(entry.messaging)) {\n    for (const event of entry.messaging) candidates.push({ entry, event });\n  }\n  if (Array.isArray(entry.changes)) {\n    for (const change of entry.changes) {\n      const value = change.value || {};\n      const messages = Array.isArray(value.messages) ? value.messages : [];\n      for (const message of messages) candidates.push({ entry, value, message });\n    }\n  }\n}\n\nconst normalized = candidates.map(normalizeCandidate).find((item) => item.is_valid_message) || {\n  tenant_id: $env[\"DEFAULT_TENANT_ID\"] || 'demo',\n  channel: 'instagram',\n  event_type: 'ignored',\n  raw_event: body,\n  is_instagram_message: false,\n  is_valid_message: false,\n};\n\nreturn { json: normalized };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "notes": "Extracts IG sender/thread/message and blocks outbound echo loops using IG_INSTAGRAM_BUSINESS_ACCOUNT_ID.",
+      "notesInFlow": true
+    },
+    {
+      "id": "get_tenant_settings_1",
+      "name": "Get Tenant Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        360
+      ],
+      "parameters": {
+        "url": "={{$env[\"SUPABASE_REST_URL\"]}}/rpc/get_tenant_settings",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"]}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  p_tenant_id: $json.tenant_id\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      },
+      "notes": "Loads per-tenant brand/language/style/confidence settings from Supabase.",
+      "notesInFlow": true
+    },
+    {
+      "id": "get_thread_context_1",
+      "name": "Get Thread Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        360
+      ],
+      "parameters": {
+        "url": "={{$env[\"SUPABASE_REST_URL\"]}}/rpc/get_thread_context",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"]}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  p_tenant_id: $json.tenant_id || $node['Normalize Instagram Event'].json.tenant_id,\n  p_thread_id: $node['Normalize Instagram Event'].json.thread_id,\n  p_limit: Number($env[\"CONV_CONTEXT_LIMIT\"] || 8)\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      },
+      "notes": "Loads recent conversation context from Supabase for the current Instagram thread.",
+      "notesInFlow": true
+    },
+    {
+      "id": "classify_intent_1",
+      "name": "Classify Message Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        360
+      ],
+      "parameters": {
+        "jsCode": "const normalized = $node['Normalize Instagram Event'].json || {};\nconst tenantRows = Array.isArray($node['Get Tenant Settings'].json)\n  ? $node['Get Tenant Settings'].json\n  : ($node['Get Tenant Settings'].json ? [$node['Get Tenant Settings'].json] : []);\nconst tenantSettings = tenantRows.find((row) => row && row.tenant_id) || tenantRows[0] || {};\n\nconst threadPayload = $node['Get Thread Context'].json || $json || {};\nconst threadRows = Array.isArray(threadPayload.rows)\n  ? threadPayload.rows\n  : Array.isArray(threadPayload)\n    ? threadPayload\n    : Array.isArray($json)\n      ? $json\n      : [];\n\nconst messageText = String(normalized.message_text || '').trim();\nconst lowered = messageText.toLowerCase();\n\nconst askSignals = [\n  'what', 'how', 'where', 'when', 'why', 'help', 'info', 'price',\n  'support', 'can', 'tell me', 'please', 'document', 'guide', 'policy',\n  'plan', 'cost', 'hours', 'status', '?',\n];\nconst handoffSignals = [\n  'human', 'agent', 'operator', 'manager', 'handover', 'escalate',\n  'real person', 'support team', 'someone else',\n];\n\nlet intent = 'other';\nlet intentConfidence = 0.42;\nlet intentReason = 'fallback_other';\n\nif (handoffSignals.some((signal) => lowered.includes(signal))) {\n  intent = 'human_handoff';\n  intentConfidence = 0.98;\n  intentReason = 'handoff_signal_match';\n} else if (askSignals.some((signal) => lowered.includes(signal))) {\n  intent = 'ask';\n  intentConfidence = lowered.includes('?') ? 0.95 : 0.89;\n  intentReason = 'ask_signal_match';\n} else if (messageText.length > 260) {\n  intent = 'ask';\n  intentConfidence = 0.6;\n  intentReason = 'long_message_fallback';\n}\n\nconst recentContext = Array.isArray(threadRows)\n  ? threadRows\n      .filter((row) => row && typeof row === 'object')\n      .slice(0, 4)\n      .map((row) => ({\n        role: row.role,\n        intent: row.intent || null,\n        content: row.content,\n        confidence: row.confidence,\n      }))\n  : [];\n\nreturn [{\n  json: {\n    ...normalized,\n    tenant_settings: tenantSettings,\n    tenant_style: tenantSettings.response_style || 'concise, practical, and polite',\n    thread_context_rows: threadRows,\n    thread_context_preview: recentContext,\n    intent,\n    intent_confidence: Number(intentConfidence.toFixed(2)),\n    intent_source: intentReason,\n    classified_at: new Date().toISOString(),\n  },\n}];"
+      }
+    },
+    {
+      "id": "if_message_1",
+      "name": "Is Instagram Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        820,
+        360
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "route-only-inbound-instagram-message",
+              "leftValue": "={{($json.event_type === \"instagram_message\" && String($json.message_text || \"\").length > 0 && String($json.is_outbound_echo || \"\").toLowerCase() !== \"true\" && String($json.instagram_sender_id || \"\") !== String($env[\"IG_INSTAGRAM_BUSINESS_ACCOUNT_ID\"] || $json.ig_business_account_id || \"\")) ? \"process\" : \"skip\"}}",
+              "rightValue": "process",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Routes only real inbound Instagram messages. Non-message events and outbound echo events stop here.",
+      "notesInFlow": true
+    },
+    {
+      "id": "if_ask_1",
+      "name": "Is Ask Intent",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ask-intent",
+              "leftValue": "={{$json.intent}}",
+              "rightValue": "ask",
+              "operator": {
+                "type": "string",
+                "operation": "equal",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "if_handoff_1",
+      "name": "Is Handoff Intent",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "handoff-intent",
+              "leftValue": "={{$json.intent}}",
+              "rightValue": "human_handoff",
+              "operator": {
+                "type": "string",
+                "operation": "equal",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "log_user_message_1",
+      "name": "Log User Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        220
+      ],
+      "parameters": {
+        "url": "={{$env[\"SUPABASE_REST_URL\"]}}/conversation_events",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"]}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"] || '')}}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  tenant_id: $json.tenant_id,\n  channel: 'instagram',\n  instagram_thread_id: $json.thread_id,\n  role: 'user',\n  content: $json.message_text,\n  intent: $json.intent,\n  confidence: $json.intent_confidence || 0,\n  matched_document_ids: [],\n  model_name: 'inbound_event',\n  latency_ms: 0,\n  escalated: false,\n  raw_event: $json.raw_event || {}\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      }
+    },
+    {
+      "id": "embed_request_1",
+      "name": "Create Message Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        220
+      ],
+      "parameters": {
+        "url": "https://api.openai.com/v1/embeddings",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($json.openai_api_key || $env[\"OPENAI_API_KEY\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  input: $node['Classify Message Intent'].json.message_text,\n  model: $env[\"OPENAI_EMBEDDING_MODEL\"] || 'text-embedding-3-small'\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      }
+    },
+    {
+      "id": "parse_embedding_1",
+      "name": "Parse Embedding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const source = $node['Classify Message Intent'].json || {};\nconst payload = $json || {};\nconst data = Array.isArray(payload.data) ? payload.data : [];\nconst embedding = data[0]?.embedding;\n\nif (!Array.isArray(embedding) || embedding.length === 0) {\n  throw new Error('No embedding returned by OpenAI.');\n}\n\nconst fallbackModel = 'text-embedding-3-small';\nconst sourceModel = source.openai_embedding_model || source.tenant_settings?.embedding_model || source.tenant_settings?.openai_embedding_model;\nconst candidateModel = data[0]?.model || sourceModel || fallbackModel;\n\nreturn [{\n  json: {\n    ...source,\n    embedding,\n    openai_embedding_model: candidateModel,\n    openai_embedding_usage: data[0]?.usage || payload.usage || {},\n    ask_stage: 'embedded',\n    normalized_at: new Date().toISOString(),\n  }\n}];"
+      }
+    },
+    {
+      "id": "match_documents_1",
+      "name": "Match Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2040,
+        220
+      ],
+      "parameters": {
+        "url": "={{$env[\"SUPABASE_REST_URL\"]}}/rpc/match_documents_with_context",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"]}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  query_embedding: $json.embedding,\n  match_count: Number($env[\"SUPABASE_MATCH_COUNT\"] || 8),\n  min_similarity: Number($env[\"SUPABASE_MIN_SIMILARITY\"] || 0.35),\n  p_tenant_id: $json.tenant_id,\n  p_message_id: $json.message_id,\n  p_thread_id: $json.thread_id,\n  p_channel: 'instagram',\n  p_message_text: $json.message_text\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      },
+      "notes": "Supabase pgvector retrieval. Embeddings are stored in Supabase, not local files or external vector stores.",
+      "notesInFlow": true
+    },
+    {
+      "id": "build_context_1",
+      "name": "Build Retrieval Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2280,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const source = $node['Parse Embedding'].json || {};\nconst rows = Array.isArray($json) ? $json : [];\n\nconst toNumber = (value, fallback, validator = () => true) => {\n  const num = Number(value);\n  return Number.isFinite(num) && validator(num) ? num : fallback;\n};\n\nconst threshold = toNumber(\n  source.rag_confidence_threshold,\n  0.6,\n  (n) => n >= 0 && n <= 1\n);\n\nconst minSimilarity = toNumber(\n  source.rag_min_similarity ?? source.tenant_settings?.min_similarity ?? source.tenant_settings?.rag_min_similarity,\n  0.35,\n  (n) => n >= 0 && n <= 1\n);\n\nconst limit = toNumber(\n  source.rag_match_count ?? source.tenant_settings?.match_count ?? source.tenant_settings?.supabase_match_count,\n  8,\n  (n) => n >= 1\n);\n\nconst docs = rows\n  .filter((row) => row && row.id && Number(row.similarity || 0) >= minSimilarity)\n  .slice(0, Math.max(1, Math.floor(limit)))\n  .map((row, index) => ({\n    rank: index + 1,\n    id: row.id,\n    tenant_id: row.tenant_id,\n    source_type: row.source_type,\n    source_key: row.source_key,\n    chunk_text: row.chunk_text,\n    similarity: Number(row.similarity || 0),\n    metadata: row.metadata || {},\n  }));\n\nconst retrievalSimilarity = docs.length\n  ? Math.max(...docs.map((doc) => doc.similarity || 0))\n  : 0;\n\nconst tenantSettings = source.tenant_settings || {};\nconst style = tenantSettings.response_style || 'concise, practical, and polite';\nconst escalationTarget = tenantSettings.escalation_target || 'human operator';\nconst brand = tenantSettings.brand_name || 'Sell.Systems';\nconst threadRows = Array.isArray(source.thread_context_rows) ? source.thread_context_rows : [];\n\nconst retrievalContext = docs.length\n  ? docs.map((doc) => '[#' + doc.rank + '] source=' + doc.source_key + '\\n' + doc.chunk_text).join('\\n\\n')\n  : 'No matching context found in Supabase vector store.';\n\nconst threadContextText = threadRows.length\n  ? threadRows\n      .slice(0, 6)\n      .map((row) => '- ' + (row.role || 'unknown') + ': ' + (row.intent || 'n/a') + ' | ' + (row.content || ''))\n      .join('\\n')\n  : 'No prior thread context available.';\n\nreturn [{\n  json: {\n    ...source,\n    retrieved_documents: docs,\n    retrieved_document_ids: docs.map((doc) => doc.id),\n    retrieval_similarity: Number(retrievalSimilarity.toFixed(4)),\n    retrieval_count: docs.length,\n    retrieval_context: retrievalContext,\n    thread_context_text: threadContextText,\n    escalation_target: escalationTarget,\n    escalate_by_confidence: retrievalSimilarity < threshold || docs.length === 0,\n    rag_threshold: threshold,\n    rag_min_similarity: minSimilarity,\n    rag_match_count: Math.max(1, Math.floor(limit)),\n    prompt_system: 'You are an official ' + brand + ' Instagram assistant. Keep responses practical and concise. Answer only from retrieved knowledge and recent thread context. If context is insufficient, escalate to ' + escalationTarget + ' transparently.',\n    prompt_user: 'Customer asked: ' + source.message_text + '\\n\\nRecent thread context:\\n' + threadContextText + '\\n\\nRetrieved context:\\n' + retrievalContext + '\\n\\nCurrent style guidance: ' + style,\n  },\n}];"
+      }
+    },
+    {
+      "id": "if_escalate_1",
+      "name": "Should Escalate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2520,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "low-confidence",
+              "leftValue": "={{$json.escalate_by_confidence === true ? 1 : 0}}",
+              "rightValue": "1",
+              "operator": {
+                "type": "number",
+                "operation": "equal",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "notes": "Low-confidence or explicit handoff requests route to escalation.",
+      "notesInFlow": true
+    },
+    {
+      "id": "build_escalation_reply_1",
+      "name": "Build Escalation Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        320
+      ],
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ...$json,\n    llm_answer: 'I’m unable to answer with enough confidence. I’m escalating this to a human agent.',\n    escalated: true,\n    answer_confidence: 0.2,\n    model_name: 'fallback',\n    generated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "notes": "Creates the one-time customer-facing escalation message. After this, the thread state is marked escalated.",
+      "notesInFlow": true
+    },
+    {
+      "id": "generate_reply_1",
+      "name": "Generate Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2760,
+        120
+      ],
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($json.openai_api_key || $env[\"OPENAI_API_KEY\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: $env[\"OPENAI_CHAT_MODEL\"] || 'gpt-4o-mini',\n  temperature: 0.3,\n  messages: [\n    { role: 'system', content: $json.prompt_system },\n    { role: 'user', content: $json.prompt_user }\n  ]\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      },
+      "notes": "Generates grounded answer from normalized message, thread context, tenant settings, and retrieved Supabase chunks.",
+      "notesInFlow": true
+    },
+    {
+      "id": "parse_reply_1",
+      "name": "Parse Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3000,
+        120
+      ],
+      "parameters": {
+        "jsCode": "const source = $node['Build Retrieval Context'].json || {};\nconst response = $json || {};\nconst content = response.choices?.[0]?.message?.content;\nconst rawAnswer = typeof content === 'string' ? content.trim() : '';\nconst answer = rawAnswer.length > 0\n  ? rawAnswer\n  : 'I could not produce a response from the model. A support agent will follow up soon.';\nconst score = Number(source.retrieval_similarity || 0);\nconst sourceModel = source.openai_chat_model || source.tenant_settings?.chat_model || source.llm_model;\n\nreturn [{\n  json: {\n    ...source,\n    llm_answer: answer,\n    escalated: false,\n    answer_confidence: Number(Math.min(0.99, 0.35 + score * 0.55).toFixed(3)),\n    model_name: response.model || sourceModel || 'gpt-4o-mini',\n    generated_at: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "send_reply_1",
+      "name": "Send Instagram Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3240,
+        120
+      ],
+      "parameters": {
+        "url": "={{ ($env[\"IG_MESSAGES_ENDPOINT\"] || (($env[\"IG_MESSAGES_BASE_URL\"] || 'https://graph.instagram.com') + '/' + ($env[\"IG_GRAPH_API_VERSION\"] || 'v21.0') + '/' + ($env[\"IG_INSTAGRAM_BUSINESS_ACCOUNT_ID\"] || $json.ig_business_account_id || $node['Normalize Instagram Event'].json.ig_business_account_id || '') + '/messages')) }}",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"IG_ACCESS_TOKEN\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  recipient: { id: $json.instagram_sender_id || $node['Parse Reply'].json.instagram_sender_id || $node['Normalize Instagram Event'].json.instagram_sender_id },\n  message: { text: $json.llm_answer || $node['Parse Reply'].json.llm_answer }\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      },
+      "notes": "Sends normal bot reply through Instagram Messaging API.",
+      "notesInFlow": true
+    },
+    {
+      "id": "log_assistant_1",
+      "name": "Log Assistant Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3480,
+        120
+      ],
+      "parameters": {
+        "url": "={{$env[\"SUPABASE_REST_URL\"]}}/conversation_events",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"]}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  tenant_id: $node['Parse Reply'].json.tenant_id,\n  channel: 'instagram',\n  instagram_thread_id: $node['Parse Reply'].json.thread_id,\n  role: 'assistant',\n  content: $node['Parse Reply'].json.llm_answer,\n  intent: $node['Parse Reply'].json.intent,\n  confidence: $node['Parse Reply'].json.answer_confidence || 0,\n  matched_document_ids: $node['Parse Reply'].json.retrieved_document_ids || [],\n  model_name: $node['Parse Reply'].json.model_name,\n  latency_ms: 0,\n  escalated: $node['Parse Reply'].json.escalated || false,\n  raw_event: $node['Parse Reply'].json.raw_event || {}\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      }
+    },
+    {
+      "id": "build_handoff_reply_1",
+      "name": "Build Handoff Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        620
+      ],
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ...$json,\n    llm_answer: 'I am escalating this to a human operator. You will receive a personalized follow-up shortly.',\n    escalated: true,\n    answer_confidence: 0.95,\n    model_name: 'handoff',\n    retrieved_documents: [],\n    retrieved_document_ids: [],\n    retrieval_count: 0,\n    retrieval_similarity: 0,\n    generated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "notes": "Creates the one-time handoff reply for explicit human/operator requests.",
+      "notesInFlow": true
+    },
+    {
+      "id": "log_handoff_1",
+      "name": "Log Handoff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        620
+      ],
+      "parameters": {
+        "url": "={{$env[\"SUPABASE_REST_URL\"]}}/conversation_events",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"]}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  tenant_id: $json.tenant_id,\n  channel: 'instagram',\n  instagram_thread_id: $json.thread_id,\n  role: 'assistant',\n  content: $json.llm_answer,\n  intent: $json.intent,\n  confidence: $json.answer_confidence || 0,\n  matched_document_ids: [],\n  model_name: $json.model_name,\n  latency_ms: 0,\n  escalated: true,\n  raw_event: $json.raw_event || {}\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      },
+      "notes": "Writes the handoff/escalation event to conversation_events with escalated=true.",
+      "notesInFlow": true
+    },
+    {
+      "id": "send_handoff_1",
+      "name": "Send Handoff Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1800,
+        620
+      ],
+      "parameters": {
+        "url": "={{ ($env[\"IG_MESSAGES_ENDPOINT\"] || (($env[\"IG_MESSAGES_BASE_URL\"] || 'https://graph.instagram.com') + '/' + ($env[\"IG_GRAPH_API_VERSION\"] || 'v21.0') + '/' + ($env[\"IG_INSTAGRAM_BUSINESS_ACCOUNT_ID\"] || $json.ig_business_account_id || $node['Normalize Instagram Event'].json.ig_business_account_id || '') + '/messages')) }}",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"IG_ACCESS_TOKEN\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  recipient: { id: $json.instagram_sender_id || $node['Build Escalation Reply'].json.instagram_sender_id || $node['Build Handoff Reply'].json.instagram_sender_id || $node['Normalize Instagram Event'].json.instagram_sender_id },\n  message: { text: $json.llm_answer || $node['Build Escalation Reply'].json.llm_answer || $node['Build Handoff Reply'].json.llm_answer }\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      },
+      "notes": "Sends the one-time handoff/escalation reply through Instagram Messaging API.",
+      "notesInFlow": true
+    },
+    {
+      "id": "other_handler_1",
+      "name": "Handle Other Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        420
+      ],
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ...$json,\n    llm_answer: 'Thanks for your message. I can help with supported questions from our knowledge base. Ask a direct question and I will answer from there, or request a human follow-up.',\n    escalated: false,\n    answer_confidence: 0.12,\n    model_name: 'fallback_other',\n    retrieved_documents: [],\n    retrieved_document_ids: [],\n    retrieval_similarity: 0,\n    retrieval_count: 0,\n    generated_at: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "log_other_1",
+      "name": "Log Other Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        420
+      ],
+      "parameters": {
+        "url": "={{$env[\"SUPABASE_REST_URL\"]}}/conversation_events",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"]}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"SUPABASE_SECRET_KEY\"] || $env[\"SUPABASE_PUBLISHABLE_KEY\"] || $env[\"SUPABASE_ANON_KEY\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  tenant_id: $json.tenant_id,\n  channel: 'instagram',\n  instagram_thread_id: $json.thread_id,\n  role: 'assistant',\n  content: $json.llm_answer,\n  intent: $json.intent,\n  confidence: $json.answer_confidence || 0,\n  matched_document_ids: [],\n  model_name: $json.model_name,\n  latency_ms: 0,\n  escalated: false,\n  raw_event: $json.raw_event || {}\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      }
+    },
+    {
+      "id": "send_other_1",
+      "name": "Send Other Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1800,
+        420
+      ],
+      "parameters": {
+        "url": "={{ ($env[\"IG_MESSAGES_ENDPOINT\"] || (($env[\"IG_MESSAGES_BASE_URL\"] || 'https://graph.instagram.com') + '/' + ($env[\"IG_GRAPH_API_VERSION\"] || 'v21.0') + '/' + ($env[\"IG_INSTAGRAM_BUSINESS_ACCOUNT_ID\"] || $json.ig_business_account_id || $node['Normalize Instagram Event'].json.ig_business_account_id || '') + '/messages')) }}",
+        "method": "POST",
+        "sendBody": true,
+        "options": {
+          "ignoreHttpStatusErrors": true
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + ($env[\"IG_ACCESS_TOKEN\"] || '')}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  recipient: { id: $json.instagram_sender_id || $node['Handle Other Messages'].json.instagram_sender_id || $node['Normalize Instagram Event'].json.instagram_sender_id },\n  message: { text: $json.llm_answer || $node['Handle Other Messages'].json.llm_answer }\n}) }}",
+        "authentication": "none",
+        "sendQuery": false,
+        "provideSslCertificates": false
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const envelope = $json || {};\nconst query = envelope.query || {};\nconst expectedToken = $env[\"IG_WEBHOOK_VERIFY_TOKEN\"];\nconst isValid = query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === expectedToken;\nreturn {\n  json: {\n    response_body: isValid ? String(query['hub.challenge'] || '') : 'Invalid hub.verify_token',\n    response_code: isValid ? 200 : 403,\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        -260
+      ],
+      "id": "build-verification-response",
+      "name": "Build Verification Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.response_body }}",
+        "options": {
+          "responseCode": "={{ $json.response_code }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain; charset=utf-8"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -140,
+        -260
+      ],
+      "id": "respond-verification-challenge",
+      "name": "Respond Verification Challenge"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "can-send-instagram-reply",
+              "leftValue": "={{((String($env[\"IG_ENABLE_LIVE_SEND\"] || '').toLowerCase() === 'true') && (String($env[\"IG_ACCESS_TOKEN\"] || '').length > 0) && (String($env[\"IG_INSTAGRAM_BUSINESS_ACCOUNT_ID\"] || '').length > 0)) ? 1 : 0}}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "equal",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "02c3d519-778b-4b96-9e73-2dedbe4af112",
+      "name": "Can Send Instagram Reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3180,
+        120
+      ],
+      "notes": "Live-send safety gate for normal replies.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "can-send-handoff-reply",
+              "leftValue": "={{((String($env[\"IG_ENABLE_LIVE_SEND\"] || '').toLowerCase() === 'true') && (String($env[\"IG_ACCESS_TOKEN\"] || '').length > 0) && (String($env[\"IG_INSTAGRAM_BUSINESS_ACCOUNT_ID\"] || '').length > 0)) ? 1 : 0}}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "equal",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "c8cb0ed6-e072-4b7b-bba9-11cbd9ba204e",
+      "name": "Can Send Handoff Reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3180,
+        320
+      ],
+      "notes": "Live-send safety gate for handoff/escalation replies.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "can-send-other-reply",
+              "leftValue": "={{((String($env[\"IG_ENABLE_LIVE_SEND\"] || '').toLowerCase() === 'true') && (String($env[\"IG_ACCESS_TOKEN\"] || '').length > 0) && (String($env[\"IG_INSTAGRAM_BUSINESS_ACCOUNT_ID\"] || '').length > 0)) ? 1 : 0}}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "equal",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "f4912772-c55f-4ed0-aaca-e6ebda096579",
+      "name": "Can Send Other Reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3180,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $node['Parse Reply'].json || $json || {};\nreturn [{\n  json: {\n    ...source,\n    delivery_status: 'dry_run',\n    delivery_skipped: true,\n    delivery_reason: 'IG_ACCESS_TOKEN and IG_INSTAGRAM_BUSINESS_ACCOUNT_ID are required for live Instagram delivery.',\n    delivery_provider: 'instagram_messaging_api',\n    delivery_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "f3c9e26a-0c8c-4eae-a166-eb925de1ed86",
+      "name": "Dry Run Instagram Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3420,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let source = $json || {};\ntry {\n  if (!source.llm_answer && $node['Build Escalation Reply'].json?.llm_answer) {\n    source = $node['Build Escalation Reply'].json;\n  }\n} catch (error) {}\ntry {\n  if (!source.llm_answer && $node['Build Handoff Reply'].json?.llm_answer) {\n    source = $node['Build Handoff Reply'].json;\n  }\n} catch (error) {}\nreturn [{\n  json: {\n    ...source,\n    delivery_status: 'dry_run',\n    delivery_skipped: true,\n    delivery_reason: 'IG_ACCESS_TOKEN and IG_INSTAGRAM_BUSINESS_ACCOUNT_ID are required for live Instagram delivery.',\n    delivery_provider: 'instagram_messaging_api',\n    delivery_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "1bbec890-7074-4650-9eca-f486d657be34",
+      "name": "Dry Run Handoff Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3420,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $node['Handle Other Messages'].json || $json || {};\nreturn [{\n  json: {\n    ...source,\n    delivery_status: 'dry_run',\n    delivery_skipped: true,\n    delivery_reason: 'IG_ACCESS_TOKEN and IG_INSTAGRAM_BUSINESS_ACCOUNT_ID are required for live Instagram delivery.',\n    delivery_provider: 'instagram_messaging_api',\n    delivery_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "652647bb-1154-4a12-a00e-8c800c7c8ff0",
+      "name": "Dry Run Other Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3420,
+        480
+      ]
+    },
+    {
+      "id": "get-thread-state-before-routing",
+      "name": "Get Thread State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        360
+      ],
+      "notesInFlow": true,
+      "notes": "Reads current per-thread bot state from Supabase. If status is escalated, the bot must stay silent until an operator runs reset_thread_escalation.",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_REST_URL}}/rpc/get_thread_state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { p_tenant_id: $node[\"Normalize Instagram Event\"].json.tenant_id, p_channel: \"instagram\", p_thread_id: $node[\"Normalize Instagram Event\"].json.thread_id } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "escalation-silence-gate",
+      "name": "Escalation Silence Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1340,
+        360
+      ],
+      "notesInFlow": true,
+      "notes": "True branch means bot may continue. False branch logs the inbound message and sends nothing because the thread is already escalated.",
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "thread-is-not-escalated",
+              "leftValue": "={{String($json.status || \"bot_active\") === \"escalated\" && $json.silence_after_escalation !== false ? \"silent\" : \"process\"}}",
+              "rightValue": "process",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "log-muted-escalated-message",
+      "name": "Log Muted Escalated Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1610,
+        580
+      ],
+      "notesInFlow": true,
+      "notes": "Audit-only branch. The customer message is logged, but the bot intentionally sends no second escalation message.",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_REST_URL}}/conversation_events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { tenant_id: $node[\"Normalize Instagram Event\"].json.tenant_id, channel: \"instagram\", instagram_thread_id: $node[\"Normalize Instagram Event\"].json.thread_id, role: \"user\", content: $node[\"Normalize Instagram Event\"].json.message_text, intent: \"muted_after_escalation\", confidence: 1, escalated: true, raw_event: { route: \"silent_after_escalation\", thread_state: $node[\"Get Thread State\"].json, original_event: $node[\"Normalize Instagram Event\"].json.raw_event } } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "silent-already-escalated",
+      "name": "Silent: Already Escalated",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1870,
+        580
+      ],
+      "notesInFlow": true,
+      "notes": "Terminal branch. Expected behavior: workflow execution succeeds and sends no Instagram reply until the operator resets thread state.",
+      "parameters": {
+        "jsCode": "return [{ json: { status: \"silent_already_escalated\", reason: \"operator_reset_required\", tenant_id: $node[\"Normalize Instagram Event\"].json.tenant_id, channel: \"instagram\", thread_id: $node[\"Normalize Instagram Event\"].json.thread_id, reset_rpc: \"reset_thread_escalation\" } }];"
+      }
+    },
+    {
+      "id": "mark-thread-escalated",
+      "name": "Mark Thread Escalated",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        810
+      ],
+      "notesInFlow": true,
+      "notes": "Sets thread_states.status=escalated. Future inbound messages from this thread are logged but not answered until a human resets the marker.",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_REST_URL}}/rpc/mark_thread_escalated",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { p_tenant_id: $node[\"Normalize Instagram Event\"].json.tenant_id, p_channel: \"instagram\", p_thread_id: $node[\"Normalize Instagram Event\"].json.thread_id, p_reason: \"bot_handoff_or_escalation\", p_metadata: { source: \"n8n_demo_rag_instagram\", last_user_message: $node[\"Normalize Instagram Event\"].json.message_text } } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "sticky-architecture-overview",
+      "name": "Sticky Note - Architecture Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1500,
+        -640
+      ],
+      "parameters": {
+        "content": "## Instagram DM RAG bot\nInbound Instagram webhook -> normalize -> Supabase thread state -> tenant/thread context -> intent -> Supabase pgvector retrieval -> OpenAI reply -> Instagram send -> audit log.\n\nSecrets stay in n8n/.env only. Public repo exports use env references.",
+        "height": 260,
+        "width": 520,
+        "color": 4
+      }
+    },
+    {
+      "id": "sticky-supabase-rag",
+      "name": "Sticky Note - Supabase RAG Only",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -360,
+        -650
+      ],
+      "parameters": {
+        "content": "## Supabase native vector memory\nUse `documents.embedding vector(1536)` plus RPC retrieval. Do not add external vector DBs, AWS/S3 wrappers, or local embeddings for this flow.\n\n`conversation_events` = audit log.\n`thread_states` = current bot routing state.",
+        "height": 260,
+        "width": 520,
+        "color": 5
+      }
+    },
+    {
+      "id": "sticky-escalation-reset",
+      "name": "Sticky Note - Operator Reset",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        680,
+        -650
+      ],
+      "parameters": {
+        "content": "## Escalation silence rule\nWhen the bot escalates, `thread_states.status` becomes `escalated`. Future messages in the same IG thread are logged but receive no bot reply.\n\nReset in Supabase SQL when a human wants bot replies again:\n`select public.reset_thread_escalation('demo', 'instagram', 'THREAD_ID', 'operator', 'ready for bot again');`",
+        "height": 300,
+        "width": 620,
+        "color": 3
+      }
+    }
+  ],
+  "connections": {
+    "Instagram Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Instagram Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Instagram Event": {
+      "main": [
+        [
+          {
+            "node": "Is Instagram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Instagram Message": {
+      "main": [
+        [
+          {
+            "node": "Get Thread State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Is Ask Intent": {
+      "main": [
+        [
+          {
+            "node": "Is Handoff Intent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log User Message": {
+      "main": [
+        [
+          {
+            "node": "Create Message Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Message Embedding": {
+      "main": [
+        [
+          {
+            "node": "Parse Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Embedding": {
+      "main": [
+        [
+          {
+            "node": "Match Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Documents": {
+      "main": [
+        [
+          {
+            "node": "Build Retrieval Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Retrieval Context": {
+      "main": [
+        [
+          {
+            "node": "Should Escalate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Escalate": {
+      "main": [
+        [
+          {
+            "node": "Generate Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Escalation Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Escalation Reply": {
+      "main": [
+        [
+          {
+            "node": "Log Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Handoff": {
+      "main": [
+        [
+          {
+            "node": "Can Send Handoff Reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mark Thread Escalated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Reply": {
+      "main": [
+        [
+          {
+            "node": "Parse Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Reply": {
+      "main": [
+        [
+          {
+            "node": "Can Send Instagram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Instagram Reply": {
+      "main": [
+        [
+          {
+            "node": "Log Assistant Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Handoff Intent": {
+      "main": [
+        [
+          {
+            "node": "Handle Other Messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Handoff Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Handoff Reply": {
+      "main": [
+        [
+          {
+            "node": "Log Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Other Messages": {
+      "main": [
+        [
+          {
+            "node": "Log Other Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Other Reply": {
+      "main": [
+        [
+          {
+            "node": "Can Send Other Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tenant Settings": {
+      "main": [
+        [
+          {
+            "node": "Get Thread Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Thread Context": {
+      "main": [
+        [
+          {
+            "node": "Classify Message Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Message Intent": {
+      "main": [
+        [
+          {
+            "node": "Is Ask Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram Webhook Verification": {
+      "main": [
+        [
+          {
+            "node": "Build Verification Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Verification Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Verification Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can Send Instagram Reply": {
+      "main": [
+        [
+          {
+            "node": "Dry Run Instagram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Instagram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Run Instagram Reply": {
+      "main": [
+        [
+          {
+            "node": "Log Assistant Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can Send Handoff Reply": {
+      "main": [
+        [
+          {
+            "node": "Dry Run Handoff Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Handoff Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can Send Other Reply": {
+      "main": [
+        [
+          {
+            "node": "Dry Run Other Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Other Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Thread State": {
+      "main": [
+        [
+          {
+            "node": "Escalation Silence Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalation Silence Gate": {
+      "main": [
+        [
+          {
+            "node": "Get Tenant Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Muted Escalated Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Muted Escalated Message": {
+      "main": [
+        [
+          {
+            "node": "Silent: Already Escalated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "default"
+  }
+}
