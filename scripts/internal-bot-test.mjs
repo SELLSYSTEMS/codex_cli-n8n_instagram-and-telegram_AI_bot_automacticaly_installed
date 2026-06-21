@@ -74,12 +74,105 @@ function maxSimilarity(matches) {
 
 function hasHardEscalationSignal(message) {
   const normalized = String(message || '').toLowerCase();
-  return /\b(human|operator|manager|escalate|complaint|refund|legal|lawyer|angry|urgent|call me|real person|human agent|live agent|support person)\b/.test(normalized);
+  const explicitEnglishHandoff = /\b(human|operator|real person|live agent|escalate|transfer me|connect me|talk to (?:a )?(?:human|person|agent|operator|manager))\b/i.test(normalized);
+  const sensitiveEnglish = /\b(complaint|refund|chargeback|legal|lawyer|lawsuit|contract dispute|angry|urgent|emergency|data deletion|gdpr|privacy request|security incident|account access|password|billing dispute)\b/i.test(normalized);
+  const explicitRussianHandoff = /(?:подключ(?:и|ите)?|позови(?:те)?|дай(?:те)?|нуж(?:ен|на)|хочу|перевед(?:и|ите)|соедин(?:и|ите)|передай(?:те)?|передать).{0,50}(?:оператор|человек|менеджер|специалист|живой|живого)|(?:оператор|человек|менеджер|специалист).{0,30}(?:позвонит|ответит|свяжется|нужен|нужна)/iu.test(normalized);
+  const sensitiveRussian = /жалоб|возврат|чарджбек|юрист|суд|договор.*спор|срочно|экстренно|удал.*данн|персональн.*данн|доступ.*аккаунт|парол|спор.*оплат/iu.test(normalized);
+  const explicitChineseHandoff = /人工|真人|客服|转接|轉接|转人工|轉人工|联系人工|聯繫人工|找人|经理|經理/u.test(normalized);
+  const sensitiveChinese = /投诉|投訴|退款|法律|律师|律師|紧急|緊急|隐私|隱私|删除数据|刪除資料|账号|帳號|密码|密碼/u.test(normalized);
+  const explicitVietnameseHandoff = /(?:gặp|chuyển|noi|nói|liên hệ|ket noi|kết nối).{0,40}(?:người thật|nhân viên|tư vấn viên|quản lý|operator|support)|(?:người thật|nhân viên|tư vấn viên|quản lý).{0,30}(?:trả lời|liên hệ|gọi|hỗ trợ)/iu.test(normalized);
+  const sensitiveVietnamese = /khiếu nại|hoàn tiền|pháp lý|luật sư|khẩn cấp|xóa dữ liệu|xoá dữ liệu|quyền riêng tư|mật khẩu|tranh chấp thanh toán/iu.test(normalized);
+
+  return explicitEnglishHandoff || sensitiveEnglish
+    || explicitRussianHandoff || sensitiveRussian
+    || explicitChineseHandoff || sensitiveChinese
+    || explicitVietnameseHandoff || sensitiveVietnamese;
 }
 
 function hasSalesIntent(message) {
   const normalized = String(message || '').toLowerCase();
-  return /\b(price|pricing|cost|package|packages|offer|offers|service|services|sell|buy|quote|proposal|instagram|automation|dm|lead|leads|audit|workflow|crm|bot|chatbot|sales|business|website|payment|payments|content|marketplace|support|process|system)\b|цена|цены|прайс|стоим|сколько|пакет|пакеты|услуг|сервис|предлож|аудит|автоматизац|бот|инстаграм|телеграм|сайт|crm|црм|оплат|лид|лиды|продаж|контент|маркетплейс|бизнес|проблем|процесс|система|поддержк|что вы можете|чем помог/i.test(normalized);
+  return /\b(price|pricing|cost|package|packages|offer|offers|service|services|sell|buy|quote|proposal|instagram|automation|dm|lead|leads|audit|workflow|crm|bot|chatbot|sales|business|website|site|landing|shop|store|ecommerce|payment|payments|content|marketplace|support|process|system|operations|integration|api|problem|customer|client|booking|order|funnel)\b|цен|прайс|стоим|сколько|пакет|услуг|сервис|предлож|аудит|автоматизац|бот|инстаграм|телеграм|сайт|лендинг|магазин|crm|црм|оплат|лид|продаж|контент|маркетплейс|бизнес|проблем|процесс|система|поддержк|клиент|заявк|заказ|воронк|интеграц|api|апи|что вы можете|чем помог|价格|價錢|多少钱|多少錢|自动化|自動化|机器人|機器人|客户|客戶|销售|銷售|线索|線索|网站|網站|漏斗|giá|bao nhiêu|tự động|tu dong|khách|khach|lead|bán hàng|ban hang|website|trang web|phễu|pheu|crm|bot/i.test(normalized);
+}
+
+function isConversationStarter(message) {
+  const value = String(message || '').trim();
+  return /^(?:hi|hello|hey|yo)(?:[\s!.?,;:]+|$)/i.test(value)
+    || /^good\s*(?:morning|afternoon|evening)(?:[\s!.?,;:]+|$)/i.test(value)
+    || /^(?:привет|здравствуй|здравствуйте|добрый|доброе)(?:[\s!.?,;:]+|$)/iu.test(value)
+    || /^(?:hola|bonjour|hallo|ciao|xin chao|chao|chào)(?:[\s!.?,;:]+|$)/iu.test(value)
+    || /^(?:你好|您好)(?:[\s!.?,;:，。！？、]+|$)/u.test(value);
+}
+
+function inferPreferredCurrency(message) {
+  const normalized = String(message || '');
+  const rules = [
+    ['USD', /\b(usd|us\s*dollars?|dollars?|\$)\b/i],
+    ['HKD', /\b(hkd|hk\$|hong\s*kong\s*dollars?)\b|港币|港幣/i],
+    ['EUR', /\b(eur|euro|euros?)\b|€/i],
+    ['GBP', /\b(gbp|pounds?|sterling)\b|£/i],
+    ['AUD', /\b(aud|australian\s*dollars?)\b/i],
+    ['CAD', /\b(cad|canadian\s*dollars?)\b/i],
+    ['SGD', /\b(sgd|singapore\s*dollars?)\b/i],
+    ['CNY', /\b(cny|rmb|yuan)\b|人民币|人民幣/i],
+    ['JPY', /\b(jpy|yen)\b|¥/i],
+    ['VND', /\b(vnd|dong|vietnamese\s*dong)\b|₫/i],
+    ['THB', /\b(thb|baht)\b/i],
+    ['AED', /\b(aed|dirham|dirhams)\b/i],
+    ['INR', /\b(inr|rupees?)\b/i],
+    ['RUB', /\b(rub|rouble|ruble|rubles?)\b|руб|₽/i],
+  ];
+  const match = rules.find(([, regex]) => regex.test(normalized));
+  return match ? match[0] : 'USD';
+}
+
+function inferResponseLanguage(message) {
+  const text = String(message || '').trim();
+  if (!text) return 'the same language as the customer message';
+
+  const cjkChars = text.match(/[\u3400-\u9FFF]/g) || [];
+  const cyrillicChars = text.match(/[А-Яа-яЁё]/g) || [];
+  const vietnameseChars = text.match(/[ăâđêôơưĂÂĐÊÔƠƯàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]/g) || [];
+  const latinWords = text.match(/[A-Za-z][A-Za-z'’-]*/g) || [];
+
+  if (cjkChars.length >= 2) return 'Chinese/Cantonese matching the customer message';
+  if (cyrillicChars.length >= 2) return 'Russian';
+  if (vietnameseChars.length >= 1) return 'Vietnamese';
+  if (latinWords.length >= 2) return 'English';
+
+  return 'the same language as the customer message';
+}
+
+function buildEscalationReply(responseLanguage) {
+  if (responseLanguage === 'Russian') {
+    return 'Передаю диалог человеку-оператору. Дальше я буду молчать в этом чате, пока оператор не сбросит маркер передачи.';
+  }
+  if (responseLanguage === 'Vietnamese') {
+    return 'Tôi sẽ chuyển cuộc trò chuyện này cho nhân viên phụ trách. Tôi sẽ giữ im lặng tại đây cho đến khi nhân viên đặt lại trạng thái chuyển tiếp.';
+  }
+  if (String(responseLanguage || '').startsWith('Chinese')) {
+    return '我会请人工客服查看并跟进。在操作员重置转接标记之前，我会在这里保持静默。';
+  }
+  return 'I will ask a human operator to review this and follow up. I will stay silent here until the operator resets the handoff marker.';
+}
+
+function buildGreetingReply(responseLanguage) {
+  if (responseLanguage === 'Russian') {
+    return 'Привет! Я помощник Sell.Systems по AI-автоматизации, продажам, CRM, Instagram/Telegram-ботам, сайтам и воронкам. Что сейчас важнее улучшить: больше лидов, скорость ответа клиентам, CRM-процесс или сайт/воронку?';
+  }
+  if (responseLanguage === 'Vietnamese') {
+    return 'Xin chào! Tôi là trợ lý Sell.Systems về tự động hóa AI, bán hàng, CRM, bot Instagram/Telegram, website và phễu bán hàng. Bạn muốn cải thiện phần nào trước: thêm lead, tốc độ phản hồi, quy trình CRM hay website/phễu?';
+  }
+  if (String(responseLanguage || '').startsWith('Chinese')) {
+    return '你好！我是 Sell.Systems 的 AI 自动化和销售系统助手，可以帮助规划 Instagram/Telegram 机器人、CRM、网站/漏斗和线索处理。你现在最想先改善哪一块：更多线索、回复速度、CRM 流程，还是网站/销售漏斗？';
+  }
+  return 'Hi! I am the Sell.Systems assistant for AI automation, sales/CRM workflows, Instagram/Telegram bots, websites, funnels, and lead handling. What should we improve first: more leads, faster replies, CRM process, or website/funnel?';
+}
+
+function isSimpleGreeting(message) {
+  const value = String(message || '').trim();
+  if (!isConversationStarter(value)) return false;
+  if (hasSalesIntent(value)) return false;
+  return value.split(/\s+/).filter(Boolean).length <= 3 && value.length <= 32;
 }
 
 function hasSalesCriticalContext(matches) {
@@ -92,40 +185,35 @@ function hasSalesCriticalContext(matches) {
 function shouldEscalate(message, confidence, threshold, matches = []) {
   const hardHandoff = hasHardEscalationSignal(message);
   const salesIntent = hasSalesIntent(message);
+  const conversationStarter = isConversationStarter(message);
   const salesContext = hasSalesCriticalContext(matches);
-  const answerableNearThreshold = matches.length > 0 && confidence >= Math.max(0.28, threshold - 0.12);
-  const salesContextOverride = salesIntent && salesContext && confidence >= 0.28;
-  const salesFallbackAllowed = salesIntent && !hardHandoff;
 
   if (hardHandoff) {
-    return { escalate: true, reason: 'explicit_handoff_request', sales_intent: salesIntent, sales_context: salesContext };
+    return { escalate: true, reason: 'explicit_or_sensitive_handoff_request', sales_intent: salesIntent, sales_context: salesContext, semantic_fallback: false };
   }
 
-  if (matches.length === 0 && salesFallbackAllowed) {
-    return { escalate: false, reason: 'sales_discovery_fallback_no_rag_match', sales_intent: salesIntent, sales_context: salesContext };
+  if (matches.length === 0 && (salesIntent || conversationStarter)) {
+    return { escalate: false, reason: 'semantic_sales_discovery_fallback_no_rag_match', sales_intent: salesIntent, sales_context: salesContext, semantic_fallback: true };
   }
 
   if (matches.length === 0) {
-    return { escalate: true, reason: 'no_retrieved_context', sales_intent: salesIntent, sales_context: salesContext };
+    return { escalate: false, reason: 'topic_guardrail_fallback_no_rag_match', sales_intent: salesIntent, sales_context: salesContext, semantic_fallback: true };
   }
 
-  if (salesContextOverride) {
-    return { escalate: false, reason: 'sales_context_override', sales_intent: salesIntent, sales_context: salesContext };
+  if (salesContext) {
+    return { escalate: false, reason: 'business_context_answer', sales_intent: salesIntent, sales_context: salesContext, semantic_fallback: false };
   }
 
-  if (answerableNearThreshold) {
-    return { escalate: false, reason: 'near_threshold_with_context', sales_intent: salesIntent, sales_context: salesContext };
-  }
-
-  if (confidence < threshold && salesFallbackAllowed) {
-    return { escalate: false, reason: 'sales_discovery_fallback_low_similarity', sales_intent: salesIntent, sales_context: salesContext };
+  if (confidence < threshold) {
+    return { escalate: false, reason: 'weak_context_answer_with_guardrail', sales_intent: salesIntent, sales_context: salesContext, semantic_fallback: true };
   }
 
   return {
-    escalate: confidence < threshold,
-    reason: confidence < threshold ? 'low_rag_confidence' : 'answerable_confidence',
+    escalate: false,
+    reason: 'answerable_confidence',
     sales_intent: salesIntent,
     sales_context: salesContext,
+    semantic_fallback: false,
   };
 }
 
@@ -142,12 +230,16 @@ function buildContext(matches) {
 
 function buildSalesFallbackContext(message, currency = 'USD') {
   return [
-    'Sales discovery fallback for broad inbound commercial questions when Supabase RAG is weak or empty.',
-    'Allowed offer families: AI automation, Instagram/Telegram bots, lead-response systems, CRM/workflow automation, websites, landing pages, funnels, ecommerce/shop builds, payment flows, content/marketplace operations, and customer-support automations.',
-    'For website-build interest: acknowledge the website request, connect it to lead capture, CRM, analytics, payments, and DM automation only when relevant, then ask whether they need a landing page, company website, ecommerce/shop, or full funnel.',
-    `Default currency policy: use ${currency}. Use HKD only when the customer clearly mentions Hong Kong/HK or writes in Cantonese/Chinese; otherwise use USD.`,
-    'Do not invent exact prices, timelines, case studies, discounts, guarantees, or credentials. If exact retrieved pricing is missing, say pricing depends on scope and ask one specific qualification question.',
-    'Escalate only for explicit human handoff requests, legal/refund/complaint/urgent/sensitive account-specific cases, or after repeated failed attempts where the user cannot be helped safely.',
+    'Meaning-first fallback for inbound commercial conversations when Supabase RAG is weak, missing, or not directly matched.',
+    'Primary goal: behave like a capable sales/discovery assistant, not a rigid FAQ bot. Understand customer intent across any language and keep the conversation moving toward a qualified next step.',
+    'Greeting rule: for simple greetings or conversation starters, do not answer generically. Briefly position Sell.Systems around AI automation, sales/CRM workflows, Instagram/Telegram bots, websites/funnels, and lead handling, then ask which area the customer wants to improve first.',
+    'Allowed offer families: AI automation, Instagram/Telegram DM assistants, lead-response systems, CRM/workflow automation, websites, landing pages, sales funnels, ecommerce/shop builds, payment flows, content/marketplace operations, and customer-support automations.',
+    'Discovery rule: if a customer asks for something broad or unclear, infer the likely business problem, explain the practical outcome in one or two sentences, then ask one concrete qualification question. Do not give up because exact RAG text is missing.',
+    'Website rule: a website request can connect to lead capture, CRM, analytics, payment, booking, and DM automation when relevant. Ask whether they need a landing page, company website, ecommerce/shop, or full funnel.',
+    `Currency rule: default public pricing currency is USD for every language. Current requested/default currency: ${currency}. Use another currency only if the customer explicitly asks for that currency. Do not infer currency from language alone, including Chinese/Cantonese. Do not use HKD/HK$/港币/港幣 unless requested explicitly. If retrieved context contains non-USD prices but requested/default currency is USD, ignore those non-USD prices and quote the public USD anchors. If exact conversion is not in retrieved context, quote the USD base and say final local-currency invoice can be calculated after scope confirmation.`,
+    'Pricing rule: use exact prices only when they are present in retrieved context. If exact pricing is missing, say pricing depends on scope and ask for the smallest missing scoping detail.',
+    'Topic guardrail: if the message is not clearly related to Sell.Systems services, briefly steer back to automation, websites, bots, or sales systems and ask what business result they want. Do not escalate immediately for normal ambiguity or off-topic small talk.',
+    'Escalate only when the user explicitly asks for a human/operator/manager, raises legal/refund/complaint/urgent/sensitive account-specific issues, or after repeated failed attempts where the bot cannot safely help.',
     `Latest customer message: ${String(message || '').trim() || '(empty)'}`,
   ].join('\n');
 }
@@ -263,6 +355,9 @@ async function main() {
   const threshold = Number(process.env.RAG_CONFIDENCE_THRESHOLD || tenantSettings?.confidence_threshold || 0.30);
   const decision = shouldEscalate(args.message, confidence, threshold, Array.isArray(matches) ? matches : []);
   const escalate = decision.escalate;
+  const responseLanguage = inferResponseLanguage(args.message);
+  const preferredCurrency = inferPreferredCurrency(args.message);
+  const simpleGreeting = isSimpleGreeting(args.message);
 
   if (args.log) {
     await requestJson(`${restBase}/conversation_events`, {
@@ -285,7 +380,7 @@ async function main() {
 
   let response;
   if (escalate) {
-    response = 'I will ask a human operator to review this and follow up. I will stay silent here until the operator resets the handoff marker.';
+    response = buildEscalationReply(responseLanguage);
     await requestJson(`${restBase}/rpc/mark_thread_escalated`, {
       method: 'POST',
       headers: supabaseHeaders,
@@ -297,15 +392,13 @@ async function main() {
         p_metadata: { source: 'internal_bot_test', confidence, threshold, decision },
       }),
     });
+  } else if (simpleGreeting) {
+    response = buildGreetingReply(responseLanguage);
   } else {
     const chatModel = process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
     const latestMessage = args.message || '';
-const hasCyrillic = /[А-Яа-яЁё]/.test(latestMessage);
-const hasCjk = /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(latestMessage);
-const customerLanguage = hasCyrillic ? 'Russian' : hasCjk ? 'Cantonese/Traditional Chinese' : 'English';
-const preferredCurrency = /(hong\s*kong|\bhk\b|hk\$|香港|港|廣東話|广东话|粵語|粤语|cantonese)/i.test(latestMessage) || hasCjk ? 'HKD' : 'USD';
     const retrievedContext = buildContext(Array.isArray(matches) ? matches.slice(0, matchCount) : []);
-    const context = retrievedContext || (decision.sales_intent ? buildSalesFallbackContext(latestMessage, preferredCurrency) : '');
+    const context = retrievedContext || buildSalesFallbackContext(latestMessage, preferredCurrency);
     const priorMessages = Array.isArray(threadContext)
       ? threadContext.map((event) => `${event.role}: ${event.content}`).join('\n')
       : '';
@@ -320,22 +413,27 @@ const preferredCurrency = /(hong\s*kong|\bhk\b|hk\$|香港|港|廣東話|广东�
             role: 'system',
             content: [
               `You are the official ${tenantSettings?.brand_name || 'Sell.Systems'} inbound sales assistant test harness for Instagram DM.`,
-              `Required output language: ${customerLanguage}\nRequired pricing currency: ${preferredCurrency}. This overrides retrieved context language.`,
-    `Required pricing currency: ${preferredCurrency}. Default to USD for international users. Use HKD only when the customer is clearly in Hong Kong, mentions HK/Hong Kong, or writes in Cantonese/Chinese. This overrides retrieved context currency.`,
-              'Use retrieved company context to sell and qualify inbound leads.',
-              'If services, packages, audits, quote logic, or pricing guidance appear in context, answer with those details and recommend the next step.',
-    'Treat every inbound interest as sales discovery: if the customer asks about automation, AI, bots, Instagram, Telegram, CRM, websites, payments, leads, content, marketplaces, operations, support, pricing, or business problems, connect it to relevant Sell.Systems offers from context, explain the practical outcome, recommend the smallest useful next step, and ask one specific qualifying question.',
-    'If the user asks about prices, packages, services, costs, quotes, budgets, or what Sell.Systems offers, and the retrieved context contains fixed prices, anchor prices, currency amounts, packages, product names, or offer tables, name the relevant amounts directly in the context currency before saying details may vary.',
-    'For broad pricing questions, give a compact menu of the most relevant retrieved offers instead of a vague depends answer.',
-    'If exact pricing is missing from retrieved context, say pricing depends on scope and ask one or two qualification questions.',
-              'Escalate only for explicit human handoff, legal/refund/complaint issues, or sensitive account-specific cases. Do not escalate normal sales/service/website/pricing questions only because retrieval is weak.',
-              'Reply in the same language as the latest customer message. Do not switch language because retrieved context is written in another language. Keep it concise, practical, and sales-oriented.',
+              'Operate by meaning and customer intent, not by hard-coded language rules. Customers may write in any language and may request any currency.',
+              'Reply in the same language as the latest customer message unless the customer asks for another language.',
+              `Required response language: ${responseLanguage}. This controls customer-facing language only; do not use it for intent, price selection, currency, or escalation.`,
+              'Every customer-facing sentence must be in the required response language. If it is English, answer only in English; if Russian, answer only in Russian; if Chinese/Cantonese, answer in Chinese/Cantonese.',
+              `Default/requested pricing currency: ${preferredCurrency}. Default public pricing is USD for every language. Use another currency only if the customer explicitly asks for it. Do not infer HKD/CNY/local currency from Chinese/Cantonese text alone. Do not use HKD/HK$/港币/港幣 unless requested explicitly. If retrieved context contains non-USD prices but preferred currency is USD, ignore those non-USD prices and quote the public USD anchors. If conversion is not available in context, keep the base price in USD and say local-currency conversion can be confirmed after scope.`,
+              'Use retrieved Supabase company context for factual claims. When fallback context is provided, use it for sales discovery, qualification, and safe offer-family framing only.',
+              'Do not invent exact prices, delivery timelines, discounts, guarantees, or case studies that are not in the context.',
+              'Treat ordinary interest as sales discovery: if the customer asks about automation, AI, bots, Instagram, Telegram, CRM, websites, payments, leads, content, marketplaces, operations, support, pricing, or business problems, connect it to relevant Sell.Systems offers, explain the practical outcome, recommend the smallest useful next step, and ask one specific qualifying question.',
+      'For greetings/conversation starters, briefly introduce Sell.Systems as helping with AI automation, sales/CRM workflows, Instagram/Telegram bots, websites/funnels, and lead handling; ask one specific area to improve. Do not answer only “how can I help?”.',
+              'If the user asks about prices, packages, services, costs, quotes, budgets, or what Sell.Systems offers, and the retrieved context contains fixed prices, anchor prices, currency amounts, packages, product names, or offer tables, name the relevant amounts directly before saying details may vary.',
+              'For broad pricing questions, give a compact menu of the most relevant retrieved offers instead of a vague depends answer. If exact pricing is missing from retrieved context, say pricing depends on scope and ask one specific qualification question.',
+              'If the user is vague, diagnose needs like a human consultant: identify the likely business objective, offer the closest relevant path, and ask one useful question.',
+              'If the user is off-topic, do one short redirect back to Sell.Systems services. Only escalate after explicit human request, legal/refund/complaint/urgent/sensitive account-specific issue, or repeated inability to help safely.',
+              'Do not escalate normal sales/service/website/pricing questions only because retrieval is weak.',
+              'Keep it concise, practical, and sales-oriented.',
               'Do not mention this is an internal test unless the user asks.',
             ].join(' '),
           },
           {
             role: 'user',
-            content: `Required output language: ${customerLanguage}\n\nRecent thread context:\n${priorMessages || '(none)'}\n\nRetrieved company context:\n${context || '(none)'}\n\nIncoming message:\n${args.message}`,
+            content: `Required response language:\n${responseLanguage}\n\nDefault/requested pricing currency:\n${preferredCurrency}\n\nRecent thread context:\n${priorMessages || '(none)'}\n\nRetrieved/fallback company context:\n${context || '(none)'}\n\nIncoming message:\n${args.message}`,
           },
         ],
       }),
@@ -357,9 +455,9 @@ const preferredCurrency = /(hong\s*kong|\bhk\b|hk\$|香港|港|廣東話|广东�
         intent: escalate ? 'internal_test_escalated' : 'internal_test_answer',
         confidence,
         matched_document_ids: (Array.isArray(matches) ? matches : []).map((row) => row.id).filter(Boolean),
-        model_name: escalate ? 'handoff_rule' : (process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini'),
+        model_name: escalate ? 'handoff_rule' : simpleGreeting ? 'greeting_rule' : (process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini'),
         escalated: escalate,
-        raw_event: { source: 'internal_bot_test', thread_state: escalate ? 'escalated' : 'bot_active', decision },
+        raw_event: { source: 'internal_bot_test', thread_state: escalate ? 'escalated' : 'bot_active', decision, simple_greeting: simpleGreeting },
       }),
     });
   }
@@ -375,6 +473,10 @@ const preferredCurrency = /(hong\s*kong|\bhk\b|hk\$|香港|港|廣東話|广东�
     decision_reason: decision.reason,
     sales_intent: decision.sales_intent,
     sales_context: decision.sales_context,
+    semantic_fallback: decision.semantic_fallback,
+    preferred_currency: preferredCurrency,
+    simple_greeting: simpleGreeting,
+    response_language: responseLanguage,
     response,
     matched_sources: (Array.isArray(matches) ? matches : []).slice(0, matchCount).map((row) => ({
       source_key: row.source_key,

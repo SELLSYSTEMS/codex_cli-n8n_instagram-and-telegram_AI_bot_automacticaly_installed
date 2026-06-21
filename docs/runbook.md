@@ -453,3 +453,14 @@ select public.reset_thread_escalation('demo', 'instagram', 'THREAD_ID', 'operato
 ```
 
 6. Send another DM and confirm normal bot routing resumes.
+
+
+## Autonomous regression gate
+
+Run this before live Instagram or Telegram testing:
+
+```bash
+node scripts/internal-bot-regression-suite.mjs --thread local-regression
+```
+
+Expected result: `ok: true`. This validates sales behavior, USD pricing, multilingual answers, off-topic redirect, escalation silence, and operator reset without sending external channel replies.

@@ -113,6 +113,12 @@ Use the channel-free bot test harness before testing Instagram or Telegram:
 node scripts/internal-bot-test.mjs --thread local-sales-test-001 --message "What can you build for Instagram automation?"
 ```
 
-See `docs/internal-bot-testing.md` for escalation silence tests and reset commands.
+Run the full autonomous regression suite before live channel QA:
+
+```bash
+node scripts/internal-bot-regression-suite.mjs --thread local-regression
+```
+
+See `docs/internal-bot-testing.md` and `docs/autonomous-testing.md` for escalation silence tests, reset commands, and regression criteria.
 
 Reusable import/export artifacts are documented in `docs/import-export.md`.
