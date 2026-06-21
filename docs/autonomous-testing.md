@@ -20,7 +20,7 @@ node scripts/internal-bot-regression-suite.mjs --tenant demo --channel internal_
 - Website, CRM, Instagram, Telegram, lead handling, and sales automation requests are treated as sales opportunities, not rejected early.
 - The assistant asks a useful qualification question when the lead describes a business problem.
 - English and Chinese pricing questions are answered in the customer language and still use USD anchors.
-- Off-topic questions are redirected to Sell.Systems automation scope instead of answering unrelated content.
+- Off-topic questions are redirected to {{COMPANY_NAME}} automation scope instead of answering unrelated content.
 - Explicit operator requests mark the thread as escalated.
 - After escalation, the bot stays silent for that thread.
 - After an operator reset, the bot answers again.

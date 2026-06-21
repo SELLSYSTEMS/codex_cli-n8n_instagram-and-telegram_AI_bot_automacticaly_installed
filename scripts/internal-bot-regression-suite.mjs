@@ -192,7 +192,7 @@ function evaluate(caseDef, result) {
     if (expectation === 'cjk' && !isCjk(text)) failures.push('expected Chinese/CJK response');
     if (expectation === 'currency_vnd' && result.preferred_currency !== 'VND') failures.push(`expected preferred_currency=VND got=${result.preferred_currency}`);
     if (expectation === 'simple_greeting' && !isSimpleGreetingResult(result, text)) failures.push('expected deterministic/simple greeting sales opener');
-    if (expectation === 'redirect' && !redirectsToScope(text)) failures.push('expected redirect to Sell.Systems automation scope');
+    if (expectation === 'redirect' && !redirectsToScope(text)) failures.push('expected redirect to {{COMPANY_NAME}} automation scope');
     if (expectation === 'not_weather_answer' && !doesNotAnswerWeather(text)) failures.push('expected not to answer the weather request directly');
   }
 

@@ -1,8 +1,8 @@
 ---
 skill: n8n-instagram-rag-bot
 title: Instagram DM + Supabase RAG workflow pack
-owner: SELLSYSTEMS
-repo: codex_cli-n8n_instagram_AI_bot_automacticaly_installed
+owner: <your-github-owner>
+repo: <your-repo-name>
 runtime:
   platform: n8n
   data_store: Supabase pgvector
@@ -71,8 +71,8 @@ Use this as the deterministic output contract:
 
 ## Webhook endpoints
 
-- `https://n8nlandingtmplfgma.sellsystems.agency/webhook/instagram-webhook`
-- `https://n8nlandingtmplfgma.sellsystems.agency/webhook/knowledge-upload`
+- `https://<your-n8n-domain>/webhook/instagram-webhook`
+- `https://<your-n8n-domain>/webhook/knowledge-upload`
 
 ## Operational guardrails
 

@@ -157,15 +157,15 @@ function buildEscalationReply(responseLanguage) {
 
 function buildGreetingReply(responseLanguage) {
   if (responseLanguage === 'Russian') {
-    return 'Привет! Я помощник Sell.Systems по AI-автоматизации, продажам, CRM, Instagram/Telegram-ботам, сайтам и воронкам. Что сейчас важнее улучшить: больше лидов, скорость ответа клиентам, CRM-процесс или сайт/воронку?';
+    return 'Привет! Я помощник {{COMPANY_NAME}} по AI-автоматизации, продажам, CRM, Instagram/Telegram-ботам, сайтам и воронкам. Что сейчас важнее улучшить: больше лидов, скорость ответа клиентам, CRM-процесс или сайт/воронку?';
   }
   if (responseLanguage === 'Vietnamese') {
-    return 'Xin chào! Tôi là trợ lý Sell.Systems về tự động hóa AI, bán hàng, CRM, bot Instagram/Telegram, website và phễu bán hàng. Bạn muốn cải thiện phần nào trước: thêm lead, tốc độ phản hồi, quy trình CRM hay website/phễu?';
+    return 'Xin chào! Tôi là trợ lý {{COMPANY_NAME}} về tự động hóa AI, bán hàng, CRM, bot Instagram/Telegram, website và phễu bán hàng. Bạn muốn cải thiện phần nào trước: thêm lead, tốc độ phản hồi, quy trình CRM hay website/phễu?';
   }
   if (String(responseLanguage || '').startsWith('Chinese')) {
-    return '你好！我是 Sell.Systems 的 AI 自动化和销售系统助手，可以帮助规划 Instagram/Telegram 机器人、CRM、网站/漏斗和线索处理。你现在最想先改善哪一块：更多线索、回复速度、CRM 流程，还是网站/销售漏斗？';
+    return '你好！我是 {{COMPANY_NAME}} 的 AI 自动化和销售系统助手，可以帮助规划 Instagram/Telegram 机器人、CRM、网站/漏斗和线索处理。你现在最想先改善哪一块：更多线索、回复速度、CRM 流程，还是网站/销售漏斗？';
   }
-  return 'Hi! I am the Sell.Systems assistant for AI automation, sales/CRM workflows, Instagram/Telegram bots, websites, funnels, and lead handling. What should we improve first: more leads, faster replies, CRM process, or website/funnel?';
+  return 'Hi! I am the {{COMPANY_NAME}} assistant for AI automation, sales/CRM workflows, Instagram/Telegram bots, websites, funnels, and lead handling. What should we improve first: more leads, faster replies, CRM process, or website/funnel?';
 }
 
 function isSimpleGreeting(message) {
@@ -232,13 +232,13 @@ function buildSalesFallbackContext(message, currency = 'USD') {
   return [
     'Meaning-first fallback for inbound commercial conversations when Supabase RAG is weak, missing, or not directly matched.',
     'Primary goal: behave like a capable sales/discovery assistant, not a rigid FAQ bot. Understand customer intent across any language and keep the conversation moving toward a qualified next step.',
-    'Greeting rule: for simple greetings or conversation starters, do not answer generically. Briefly position Sell.Systems around AI automation, sales/CRM workflows, Instagram/Telegram bots, websites/funnels, and lead handling, then ask which area the customer wants to improve first.',
+    'Greeting rule: for simple greetings or conversation starters, do not answer generically. Briefly position {{COMPANY_NAME}} around AI automation, sales/CRM workflows, Instagram/Telegram bots, websites/funnels, and lead handling, then ask which area the customer wants to improve first.',
     'Allowed offer families: AI automation, Instagram/Telegram DM assistants, lead-response systems, CRM/workflow automation, websites, landing pages, sales funnels, ecommerce/shop builds, payment flows, content/marketplace operations, and customer-support automations.',
     'Discovery rule: if a customer asks for something broad or unclear, infer the likely business problem, explain the practical outcome in one or two sentences, then ask one concrete qualification question. Do not give up because exact RAG text is missing.',
     'Website rule: a website request can connect to lead capture, CRM, analytics, payment, booking, and DM automation when relevant. Ask whether they need a landing page, company website, ecommerce/shop, or full funnel.',
     `Currency rule: default public pricing currency is USD for every language. Current requested/default currency: ${currency}. Use another currency only if the customer explicitly asks for that currency. Do not infer currency from language alone, including Chinese/Cantonese. Do not use HKD/HK$/港币/港幣 unless requested explicitly. If retrieved context contains non-USD prices but requested/default currency is USD, ignore those non-USD prices and quote the public USD anchors. If exact conversion is not in retrieved context, quote the USD base and say final local-currency invoice can be calculated after scope confirmation.`,
     'Pricing rule: use exact prices only when they are present in retrieved context. If exact pricing is missing, say pricing depends on scope and ask for the smallest missing scoping detail.',
-    'Topic guardrail: if the message is not clearly related to Sell.Systems services, briefly steer back to automation, websites, bots, or sales systems and ask what business result they want. Do not escalate immediately for normal ambiguity or off-topic small talk.',
+    'Topic guardrail: if the message is not clearly related to {{COMPANY_NAME}} services, briefly steer back to automation, websites, bots, or sales systems and ask what business result they want. Do not escalate immediately for normal ambiguity or off-topic small talk.',
     'Escalate only when the user explicitly asks for a human/operator/manager, raises legal/refund/complaint/urgent/sensitive account-specific issues, or after repeated failed attempts where the bot cannot safely help.',
     `Latest customer message: ${String(message || '').trim() || '(empty)'}`,
   ].join('\n');
@@ -412,7 +412,7 @@ async function main() {
           {
             role: 'system',
             content: [
-              `You are the official ${tenantSettings?.brand_name || 'Sell.Systems'} inbound sales assistant test harness for Instagram DM.`,
+              `You are the official ${tenantSettings?.brand_name || '{{COMPANY_NAME}}'} inbound sales assistant test harness for Instagram DM.`,
               'Operate by meaning and customer intent, not by hard-coded language rules. Customers may write in any language and may request any currency.',
               'Reply in the same language as the latest customer message unless the customer asks for another language.',
               `Required response language: ${responseLanguage}. This controls customer-facing language only; do not use it for intent, price selection, currency, or escalation.`,
@@ -420,12 +420,12 @@ async function main() {
               `Default/requested pricing currency: ${preferredCurrency}. Default public pricing is USD for every language. Use another currency only if the customer explicitly asks for it. Do not infer HKD/CNY/local currency from Chinese/Cantonese text alone. Do not use HKD/HK$/港币/港幣 unless requested explicitly. If retrieved context contains non-USD prices but preferred currency is USD, ignore those non-USD prices and quote the public USD anchors. If conversion is not available in context, keep the base price in USD and say local-currency conversion can be confirmed after scope.`,
               'Use retrieved Supabase company context for factual claims. When fallback context is provided, use it for sales discovery, qualification, and safe offer-family framing only.',
               'Do not invent exact prices, delivery timelines, discounts, guarantees, or case studies that are not in the context.',
-              'Treat ordinary interest as sales discovery: if the customer asks about automation, AI, bots, Instagram, Telegram, CRM, websites, payments, leads, content, marketplaces, operations, support, pricing, or business problems, connect it to relevant Sell.Systems offers, explain the practical outcome, recommend the smallest useful next step, and ask one specific qualifying question.',
-      'For greetings/conversation starters, briefly introduce Sell.Systems as helping with AI automation, sales/CRM workflows, Instagram/Telegram bots, websites/funnels, and lead handling; ask one specific area to improve. Do not answer only “how can I help?”.',
-              'If the user asks about prices, packages, services, costs, quotes, budgets, or what Sell.Systems offers, and the retrieved context contains fixed prices, anchor prices, currency amounts, packages, product names, or offer tables, name the relevant amounts directly before saying details may vary.',
+              'Treat ordinary interest as sales discovery: if the customer asks about automation, AI, bots, Instagram, Telegram, CRM, websites, payments, leads, content, marketplaces, operations, support, pricing, or business problems, connect it to relevant {{COMPANY_NAME}} offers, explain the practical outcome, recommend the smallest useful next step, and ask one specific qualifying question.',
+      'For greetings/conversation starters, briefly introduce {{COMPANY_NAME}} as helping with AI automation, sales/CRM workflows, Instagram/Telegram bots, websites/funnels, and lead handling; ask one specific area to improve. Do not answer only “how can I help?”.',
+              'If the user asks about prices, packages, services, costs, quotes, budgets, or what {{COMPANY_NAME}} offers, and the retrieved context contains fixed prices, anchor prices, currency amounts, packages, product names, or offer tables, name the relevant amounts directly before saying details may vary.',
               'For broad pricing questions, give a compact menu of the most relevant retrieved offers instead of a vague depends answer. If exact pricing is missing from retrieved context, say pricing depends on scope and ask one specific qualification question.',
               'If the user is vague, diagnose needs like a human consultant: identify the likely business objective, offer the closest relevant path, and ask one useful question.',
-              'If the user is off-topic, do one short redirect back to Sell.Systems services. Only escalate after explicit human request, legal/refund/complaint/urgent/sensitive account-specific issue, or repeated inability to help safely.',
+              'If the user is off-topic, do one short redirect back to {{COMPANY_NAME}} services. Only escalate after explicit human request, legal/refund/complaint/urgent/sensitive account-specific issue, or repeated inability to help safely.',
               'Do not escalate normal sales/service/website/pricing questions only because retrieval is weak.',
               'Keep it concise, practical, and sales-oriented.',
               'Do not mention this is an internal test unless the user asks.',

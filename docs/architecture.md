@@ -59,9 +59,9 @@
 ## API endpoints in scope
 
 - Meta verification + inbound:
-  - `https://n8nlandingtmplfgma.sellsystems.agency/webhook/instagram-webhook`
+  - `https://<your-n8n-domain>/webhook/instagram-webhook`
 - KB upload:
-  - `https://n8nlandingtmplfgma.sellsystems.agency/webhook/knowledge-upload`
+  - `https://<your-n8n-domain>/webhook/knowledge-upload`
 
 ## Why this architecture for agent reuse
 

@@ -75,7 +75,7 @@ cat <<EOF
 Automatic SQL application failed from this machine.
 Apply the SQL manually in Supabase SQL Editor with these steps:
 
-1) Open https://app.supabase.com/project/mqyqmudbyypnxhwwkisc/sql/new
+1) Open https://app.supabase.com/project/<your-supabase-project-ref>/sql/new
 2) Paste the content of ${SCHEMA_FILE}
 3) Run query
 4) Confirm tables/RPCs exist:

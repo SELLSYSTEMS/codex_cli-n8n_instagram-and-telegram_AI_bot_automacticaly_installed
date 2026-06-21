@@ -83,7 +83,7 @@ Run this once:
 
 If this machine cannot connect to Postgres, the script prints a manual Supabase SQL Editor fallback:
 
-- Open `https://app.supabase.com/project/mqyqmudbyypnxhwwkisc/sql/new`
+- Open `https://app.supabase.com/project/<your-supabase-project-ref>/sql/new`
 - Paste `schemas/supabase.sql` and execute.
 - Re-run workflow smoke tests only after object creation succeeds.
 
@@ -150,7 +150,7 @@ For production messaging on Instagram, operator must provide credentials from th
 
 Webhook path expected by this repo:
 
-- `https://n8nlandingtmplfgma.sellsystems.agency/webhook/instagram-webhook`
+- `https://<your-n8n-domain>/webhook/instagram-webhook`
 
 Meta webhook verification behavior is:
 
@@ -219,9 +219,9 @@ Notes:
 
 ### Project identity values used by this repo (non-secret)
 
-- Supabase project URL `https://mqyqmudbyypnxhwwkisc.supabase.co`
-- Supabase project ref/id `mqyqmudbyypnxhwwkisc`
-- Supabase project name `supabase_codex_cli-n8n_instagram_AI_bot_automacticaly_installed`
+- Supabase project URL `https://<your-project-ref>.supabase.co`
+- Supabase project ref/id `<your-supabase-project-ref>`
+- Supabase project name `<your-supabase-project-name>`
 - Supabase org slug `xpfdvfkwzqvmwfxmcqrr`
 - Supabase region `us-west-2`
 
@@ -243,11 +243,11 @@ In `.env`, this repo expects:
 ## What this session already has from your provided inputs
 
 - Repository/project IDs and non-secret references are already fixed:
-  - repo: `SELLSYSTEMS/codex_cli-n8n_instagram_AI_bot_automacticaly_installed`
-  - n8n domain: `https://n8nlandingtmplfgma.sellsystems.agency`
+  - repo: `<your-github-owner>/<your-repo-name>`
+  - n8n domain: `https://<your-n8n-domain>`
   - workflow names and webhook paths as defined in this repo
-  - Supabase project ref/ID: `mqyqmudbyypnxhwwkisc`
-  - Supabase URL: `https://mqyqmudbyypnxhwwkisc.supabase.co`
+  - Supabase project ref/ID: `<your-supabase-project-ref>`
+  - Supabase URL: `https://<your-project-ref>.supabase.co`
   - Supabase region: `us-west-2`
 - Supabase vector wrapper policy for this repo is settled: **pgvector only, no AWS/S3 vector path**.
 
@@ -262,7 +262,7 @@ In `.env`, this repo expects:
 If any item above is missing, do not activate production traffic yet.
 
 - n8n:
-  - base URL `https://n8nlandingtmplfgma.sellsystems.agency`.
+  - base URL `https://<your-n8n-domain>`.
 
 ### Still required from you before production
 
@@ -316,9 +316,9 @@ This updates:
 3. Import/sync both workflow JSON files with the known names.
 4. Activate `Demo: RAG in n8n` only after webhook verification test passes.
 5. Configure Meta webhook callback to:
-   `https://n8nlandingtmplfgma.sellsystems.agency/webhook/instagram-webhook`
+   `https://<your-n8n-domain>/webhook/instagram-webhook`
 6. Configure knowledge ingest endpoint:
-   `https://n8nlandingtmplfgma.sellsystems.agency/webhook/knowledge-upload`
+   `https://<your-n8n-domain>/webhook/knowledge-upload`
 7. Run smoke tests and confirm execution rows in n8n + Supabase insertions.
 
 ## Architecture guardrails
@@ -345,12 +345,12 @@ curl -s -X POST \
   -d '{
     "tenant_id": "example-tenant",
     "source_key": "playbook-intro",
-    "source_text": "Sell.Systems offers 24/7 Instagram support and automates response workflows for SMB accounts."
+    "source_text": "{{COMPANY_NAME}} offers 24/7 Instagram support and automates response workflows for SMB accounts."
   }' \
-  "https://n8nlandingtmplfgma.sellsystems.agency/webhook/knowledge-upload"
+  "https://<your-n8n-domain>/webhook/knowledge-upload"
 
 # 2) Webhook verification challenge
-curl -s "https://n8nlandingtmplfgma.sellsystems.agency/webhook/instagram-webhook?hub.mode=subscribe&hub.challenge=verify-ok&hub.verify_token=$IG_VERIFY_TOKEN"
+curl -s "https://<your-n8n-domain>/webhook/instagram-webhook?hub.mode=subscribe&hub.challenge=verify-ok&hub.verify_token=$IG_VERIFY_TOKEN"
 
 # 3) Simulate inbound IG message
 curl -s -X POST \
@@ -382,7 +382,7 @@ curl -s -X POST \
       }
     ]
   }' \
-  "https://n8nlandingtmplfgma.sellsystems.agency/webhook/instagram-webhook"
+  "https://<your-n8n-domain>/webhook/instagram-webhook"
 ```
 
 Checklist after each call:
@@ -409,7 +409,7 @@ Checklist after each call:
 
 ## Verified smoke-test state - 2026-06-18
 
-Validated on `https://n8nlandingtmplfgma.sellsystems.agency`:
+Validated on `https://<your-n8n-domain>`:
 
 - Workflow `Demo: RAG in n8n` is active.
 - Workflow `Knowledge Upload to Supabase` is active.

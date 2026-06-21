@@ -35,4 +35,4 @@ Each future user should bring their own curated company pack. The template shoul
 - `guardrails`
 - `handoff_rules`
 
-The template should not ship Sell.Systems private content as default retrieval data.
+The template should not ship {{COMPANY_NAME}} private content as default retrieval data.

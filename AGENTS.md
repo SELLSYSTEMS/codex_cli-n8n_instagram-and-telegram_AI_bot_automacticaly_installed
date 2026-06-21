@@ -23,5 +23,5 @@ Do not use this repo as an execution target for host/network platform changes.
 
 ## Operational Notes
 
-- Main n8n domain: `https://n8nlandingtmplfgma.sellsystems.agency`
+- Main n8n domain: `https://<your-n8n-domain>`
 - Keep all user-facing workflow names and labels consistent for future AI agent onboarding.

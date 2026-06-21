@@ -26,10 +26,10 @@ Use this file as the single source of truth for onboarding credentials for this 
 
 ## Required constants / non-secret values
 
-- `N8N_BASE_URL=https://n8nlandingtmplfgma.sellsystems.agency`
+- `N8N_BASE_URL=https://<your-n8n-domain>`
 - `SUPABASE_ORG_SLUG=xpfdvfkwzqvmwfxmcqrr`
-- `SUPABASE_PROJECT_ID=mqyqmudbyypnxhwwkisc`
-- `SUPABASE_REST_URL=https://mqyqmudbyypnxhwwkisc.supabase.co/rest/v1`
+- `SUPABASE_PROJECT_ID=<your-supabase-project-ref>`
+- `SUPABASE_REST_URL=https://<your-project-ref>.supabase.co/rest/v1`
 - `IG_MESSAGES_BASE_URL=https://graph.instagram.com`
 - `IG_GRAPH_API_VERSION=v21.0`
 

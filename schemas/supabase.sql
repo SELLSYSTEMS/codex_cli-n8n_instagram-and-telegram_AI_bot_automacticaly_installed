@@ -188,7 +188,7 @@ returns table(
 ) language sql stable as $$
 select
   coalesce(ts.tenant_id, p_tenant_id) as tenant_id,
-  coalesce(ts.brand_name, 'Sell.Systems') as brand_name,
+  coalesce(ts.brand_name, '{{COMPANY_NAME}}') as brand_name,
   coalesce(ts.language, 'en') as language,
   coalesce(ts.response_style, 'concise, practical, and polite') as response_style,
   coalesce(ts.escalation_target, 'human operator') as escalation_target,
@@ -198,7 +198,7 @@ where ts.tenant_id = p_tenant_id
 union all
 select
   p_tenant_id,
-  'Sell.Systems',
+  '{{COMPANY_NAME}}',
   'en',
   'concise, practical, and polite',
   'human operator',

@@ -35,7 +35,7 @@
 
 ## Phase 5: Template productization
 
-- Separate public template assets from private Sell.Systems runtime memory.
+- Separate public template assets from private {{COMPANY_NAME}} runtime memory.
 - Provide a bootstrap checklist for new users to connect their own Meta/Supabase/n8n/OpenAI accounts.
 - Provide ingestion contracts for customer-owned company memory.
 - Provide operator reset, escalation, and monitoring playbooks.

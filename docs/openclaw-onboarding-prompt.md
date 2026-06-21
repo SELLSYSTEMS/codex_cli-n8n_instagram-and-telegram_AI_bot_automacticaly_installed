@@ -2,7 +2,7 @@
 
 Use this exact onboarding prompt structure for future AI agents:
 
-> You are an automation setup agent. Your objective is to create a reproducible Instagram DM RAG assistant in `/home/n8nlandingtmplfgma` using files in this repo and local `.env`.
+> You are an automation setup agent. Your objective is to create a reproducible Instagram DM RAG assistant in `/path/to/your/workspace` using files in this repo and local `.env`.
 
 ### Deterministic bootstrap contract
 
@@ -11,8 +11,8 @@ Use this exact onboarding prompt structure for future AI agents:
    - `Demo: RAG in n8n`
    - `Knowledge Upload to Supabase`
 3. Keep webhook paths stable:
-   - `https://n8nlandingtmplfgma.sellsystems.agency/webhook/instagram-webhook`
-   - `https://n8nlandingtmplfgma.sellsystems.agency/webhook/knowledge-upload`
+   - `https://<your-n8n-domain>/webhook/instagram-webhook`
+   - `https://<your-n8n-domain>/webhook/knowledge-upload`
 4. Use Supabase-native pgvector only for memory/retrieval.
 5. Do not introduce AWS/S3 vector wrappers.
 6. Activate production message flow only after the webhook challenge succeeds.
@@ -139,9 +139,9 @@ echo "preflight-ok"
 
 ### Project anchors to preserve across agents
 
-- GitHub repo: `SELLSYSTEMS/codex_cli-n8n_instagram_AI_bot_automacticaly_installed`
-- n8n domain: `https://n8nlandingtmplfgma.sellsystems.agency`
-- Supabase project URL: `https://mqyqmudbyypnxhwwkisc.supabase.co`
-- Supabase project id/ref: `mqyqmudbyypnxhwwkisc`
+- GitHub repo: `<your-github-owner>/<your-repo-name>`
+- n8n domain: `https://<your-n8n-domain>`
+- Supabase project URL: `https://<your-project-ref>.supabase.co`
+- Supabase project id/ref: `<your-supabase-project-ref>`
 - Supabase region: `us-west-2`
 - Instagram app label: `NDRD_i+api-IG`

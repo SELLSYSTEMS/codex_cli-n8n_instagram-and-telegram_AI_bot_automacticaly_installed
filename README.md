@@ -39,12 +39,12 @@ The intended bootstrap flow is:
 
 ## Required domains and names
 
-- n8n URL: `https://n8nlandingtmplfgma.sellsystems.agency`
+- n8n URL: `https://<your-n8n-domain>`
 - Workflow target name: `Demo: RAG in n8n`
 - KB workflow name: `Knowledge Upload to Supabase`
 - Webhook endpoints:
-  - `https://n8nlandingtmplfgma.sellsystems.agency/webhook/instagram-webhook`
-  - `https://n8nlandingtmplfgma.sellsystems.agency/webhook/knowledge-upload`
+  - `https://<your-n8n-domain>/webhook/instagram-webhook`
+  - `https://<your-n8n-domain>/webhook/knowledge-upload`
 
 ## Hard constraints
 
@@ -91,7 +91,7 @@ The public demo is configured for safe smoke testing by default. `Demo: RAG in n
 Live Instagram sending is gated by `IG_ENABLE_LIVE_SEND`. Keep it set to `false` for repository demos and synthetic webhook tests. Set it to `true` only after `IG_ACCESS_TOKEN` and `IG_INSTAGRAM_BUSINESS_ACCOUNT_ID` are configured in `.env`, then resync the workflow with `./scripts/sync-workflows.sh`.
 
 Verified state:
-- Supabase schema and RPCs are applied in project `mqyqmudbyypnxhwwkisc`.
+- Supabase schema and RPCs are applied in project `<your-supabase-project-ref>`.
 - Knowledge upload webhook writes chunks into `public.documents` using native pgvector.
 - Main Instagram workflow writes user and assistant events into `public.conversation_events`.
 - No AWS/S3 vector path is used for RAG.
@@ -103,7 +103,7 @@ Verified state:
 - `docs/roadmap.md` documents the path from private proof of concept to public template.
 - `docs/public-template-strategy.md` documents what belongs in the public repo versus private runtime memory.
 
-Repository rename note: the intended public repo name is `SELLSYSTEMS/codex_cli-n8n_instagram-and-telegram_AI_bot_automacticaly_installed`, with Instagram as the first completed channel and Telegram as a later roadmap channel.
+Repository rename note: the intended public repo name is `<your-github-owner>/<your-repo-name>`, with Instagram as the first completed channel and Telegram as a later roadmap channel.
 
 ## Internal bot testing
 
@@ -122,3 +122,7 @@ node scripts/internal-bot-regression-suite.mjs --thread local-regression
 See `docs/internal-bot-testing.md` and `docs/autonomous-testing.md` for escalation silence tests, reset commands, and regression criteria.
 
 Reusable import/export artifacts are documented in `docs/import-export.md`.
+
+## Public template boundary
+
+This repository is a reusable public template. Keep company-specific runtime data in the target n8n/Supabase environment, not in Git. See `docs/template-vs-private-runtime.md` and run `node scripts/audit-public-template-safety.mjs` before committing.

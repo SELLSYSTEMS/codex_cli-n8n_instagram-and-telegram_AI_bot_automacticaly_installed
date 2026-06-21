@@ -14,7 +14,7 @@ Use the local harness:
 ```bash
 node scripts/internal-bot-test.mjs \
   --thread local-sales-test-001 \
-  --message "What can Sell.Systems build for Instagram DM automation?"
+  --message "What can {{COMPANY_NAME}} build for Instagram DM automation?"
 ```
 
 The script reads `.env`, calls OpenAI for embeddings and chat generation, retrieves company memory from Supabase vectors, writes test conversation events with `channel = internal_test`, and prints a JSON result.
