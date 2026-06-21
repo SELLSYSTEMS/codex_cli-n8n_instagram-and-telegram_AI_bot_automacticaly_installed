@@ -95,9 +95,14 @@ function shouldEscalate(message, confidence, threshold, matches = []) {
   const salesContext = hasSalesCriticalContext(matches);
   const answerableNearThreshold = matches.length > 0 && confidence >= Math.max(0.28, threshold - 0.12);
   const salesContextOverride = salesIntent && salesContext && confidence >= 0.28;
+  const salesFallbackAllowed = salesIntent && !hardHandoff;
 
   if (hardHandoff) {
     return { escalate: true, reason: 'explicit_handoff_request', sales_intent: salesIntent, sales_context: salesContext };
+  }
+
+  if (matches.length === 0 && salesFallbackAllowed) {
+    return { escalate: false, reason: 'sales_discovery_fallback_no_rag_match', sales_intent: salesIntent, sales_context: salesContext };
   }
 
   if (matches.length === 0) {
@@ -110,6 +115,10 @@ function shouldEscalate(message, confidence, threshold, matches = []) {
 
   if (answerableNearThreshold) {
     return { escalate: false, reason: 'near_threshold_with_context', sales_intent: salesIntent, sales_context: salesContext };
+  }
+
+  if (confidence < threshold && salesFallbackAllowed) {
+    return { escalate: false, reason: 'sales_discovery_fallback_low_similarity', sales_intent: salesIntent, sales_context: salesContext };
   }
 
   return {
@@ -129,6 +138,18 @@ function buildContext(matches) {
     const text = String(row.chunk_text || '').trim();
     return `Source ${index + 1}: ${sourceLabel(row)}\n${text}`;
   }).join('\n\n---\n\n');
+}
+
+function buildSalesFallbackContext(message, currency = 'USD') {
+  return [
+    'Sales discovery fallback for broad inbound commercial questions when Supabase RAG is weak or empty.',
+    'Allowed offer families: AI automation, Instagram/Telegram bots, lead-response systems, CRM/workflow automation, websites, landing pages, funnels, ecommerce/shop builds, payment flows, content/marketplace operations, and customer-support automations.',
+    'For website-build interest: acknowledge the website request, connect it to lead capture, CRM, analytics, payments, and DM automation only when relevant, then ask whether they need a landing page, company website, ecommerce/shop, or full funnel.',
+    `Default currency policy: use ${currency}. Use HKD only when the customer clearly mentions Hong Kong/HK or writes in Cantonese/Chinese; otherwise use USD.`,
+    'Do not invent exact prices, timelines, case studies, discounts, guarantees, or credentials. If exact retrieved pricing is missing, say pricing depends on scope and ask one specific qualification question.',
+    'Escalate only for explicit human handoff requests, legal/refund/complaint/urgent/sensitive account-specific cases, or after repeated failed attempts where the user cannot be helped safely.',
+    `Latest customer message: ${String(message || '').trim() || '(empty)'}`,
+  ].join('\n');
 }
 
 async function main() {
@@ -278,12 +299,13 @@ async function main() {
     });
   } else {
     const chatModel = process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
-    const context = buildContext(Array.isArray(matches) ? matches.slice(0, matchCount) : []);
     const latestMessage = args.message || '';
 const hasCyrillic = /[А-Яа-яЁё]/.test(latestMessage);
 const hasCjk = /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(latestMessage);
 const customerLanguage = hasCyrillic ? 'Russian' : hasCjk ? 'Cantonese/Traditional Chinese' : 'English';
 const preferredCurrency = /(hong\s*kong|\bhk\b|hk\$|香港|港|廣東話|广东话|粵語|粤语|cantonese)/i.test(latestMessage) || hasCjk ? 'HKD' : 'USD';
+    const retrievedContext = buildContext(Array.isArray(matches) ? matches.slice(0, matchCount) : []);
+    const context = retrievedContext || (decision.sales_intent ? buildSalesFallbackContext(latestMessage, preferredCurrency) : '');
     const priorMessages = Array.isArray(threadContext)
       ? threadContext.map((event) => `${event.role}: ${event.content}`).join('\n')
       : '';
@@ -306,7 +328,7 @@ const preferredCurrency = /(hong\s*kong|\bhk\b|hk\$|香港|港|廣東話|广东�
     'If the user asks about prices, packages, services, costs, quotes, budgets, or what Sell.Systems offers, and the retrieved context contains fixed prices, anchor prices, currency amounts, packages, product names, or offer tables, name the relevant amounts directly in the context currency before saying details may vary.',
     'For broad pricing questions, give a compact menu of the most relevant retrieved offers instead of a vague depends answer.',
     'If exact pricing is missing from retrieved context, say pricing depends on scope and ask one or two qualification questions.',
-              'Escalate only for explicit human handoff, legal/refund/complaint issues, sensitive account-specific cases, or no useful context.',
+              'Escalate only for explicit human handoff, legal/refund/complaint issues, or sensitive account-specific cases. Do not escalate normal sales/service/website/pricing questions only because retrieval is weak.',
               'Reply in the same language as the latest customer message. Do not switch language because retrieved context is written in another language. Keep it concise, practical, and sales-oriented.',
               'Do not mention this is an internal test unless the user asks.',
             ].join(' '),
