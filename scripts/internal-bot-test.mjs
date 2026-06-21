@@ -279,7 +279,11 @@ async function main() {
   } else {
     const chatModel = process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
     const context = buildContext(Array.isArray(matches) ? matches.slice(0, matchCount) : []);
-    const customerLanguage = /[А-Яа-яЁё]/.test(args.message || '') ? 'Russian' : 'English';
+    const latestMessage = args.message || '';
+const hasCyrillic = /[А-Яа-яЁё]/.test(latestMessage);
+const hasCjk = /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(latestMessage);
+const customerLanguage = hasCyrillic ? 'Russian' : hasCjk ? 'Cantonese/Traditional Chinese' : 'English';
+const preferredCurrency = /(hong\s*kong|\bhk\b|hk\$|香港|港|廣東話|广东话|粵語|粤语|cantonese)/i.test(latestMessage) || hasCjk ? 'HKD' : 'USD';
     const priorMessages = Array.isArray(threadContext)
       ? threadContext.map((event) => `${event.role}: ${event.content}`).join('\n')
       : '';
@@ -294,7 +298,8 @@ async function main() {
             role: 'system',
             content: [
               `You are the official ${tenantSettings?.brand_name || 'Sell.Systems'} inbound sales assistant test harness for Instagram DM.`,
-              `Required output language: ${customerLanguage}. This overrides retrieved context language.`,
+              `Required output language: ${customerLanguage}\nRequired pricing currency: ${preferredCurrency}. This overrides retrieved context language.`,
+    `Required pricing currency: ${preferredCurrency}. Default to USD for international users. Use HKD only when the customer is clearly in Hong Kong, mentions HK/Hong Kong, or writes in Cantonese/Chinese. This overrides retrieved context currency.`,
               'Use retrieved company context to sell and qualify inbound leads.',
               'If services, packages, audits, quote logic, or pricing guidance appear in context, answer with those details and recommend the next step.',
     'Treat every inbound interest as sales discovery: if the customer asks about automation, AI, bots, Instagram, Telegram, CRM, websites, payments, leads, content, marketplaces, operations, support, pricing, or business problems, connect it to relevant Sell.Systems offers from context, explain the practical outcome, recommend the smallest useful next step, and ask one specific qualifying question.',
