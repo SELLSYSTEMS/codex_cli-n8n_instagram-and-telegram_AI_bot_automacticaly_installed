@@ -12,7 +12,10 @@
       "name": "Sticky Note - Internal Test Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [-720, -260]
+      "position": [
+        -720,
+        -260
+      ]
     },
     {
       "parameters": {
@@ -25,7 +28,10 @@
       "name": "Internal Test Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [-720, 80],
+      "position": [
+        -720,
+        80
+      ],
       "notes": "POST JSON: {\"message\":\"...\",\"thread_id\":\"local-test-001\",\"tenant_id\":\"demo\"}. Include header x-internal-test-token matching INTERNAL_TEST_TOKEN if this workflow is activated."
     },
     {
@@ -36,7 +42,10 @@
       "name": "Normalize Internal Test Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-480, 80],
+      "position": [
+        -480,
+        80
+      ],
       "notes": "Normalizes a channel-free test request. Uses channel=internal_test so test state does not mutate production Instagram threads."
     },
     {
@@ -67,7 +76,10 @@
       "name": "Is Authorized Internal Test",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-240, 80],
+      "position": [
+        -240,
+        80
+      ],
       "notes": "Security gate for the optional public webhook. If INTERNAL_TEST_TOKEN is missing or the request token does not match, the workflow stops before OpenAI or Supabase work."
     },
     {
@@ -78,7 +90,10 @@
       "name": "Return Unauthorized",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [0, 240],
+      "position": [
+        0,
+        240
+      ],
       "notes": "Terminal branch. No external calls are made."
     },
     {
@@ -88,9 +103,18 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "apikey", "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}" },
-            { "name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}" },
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "apikey",
+              "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
@@ -102,7 +126,10 @@
       "name": "Get Internal Thread State",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [0, -40],
+      "position": [
+        0,
+        -40
+      ],
       "notes": "Reads escalation state for channel=internal_test. Escalated threads should not repeat handoff replies."
     },
     {
@@ -113,7 +140,10 @@
       "name": "Build State Decision",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [240, -40],
+      "position": [
+        240,
+        -40
+      ],
       "notes": "Converts thread state into either process, reset, or silent terminal behavior."
     },
     {
@@ -144,7 +174,10 @@
       "name": "Internal Process Gate",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [480, -40],
+      "position": [
+        480,
+        -40
+      ],
       "notes": "True branch continues to RAG. False branch returns silent/reset instructions."
     },
     {
@@ -155,7 +188,10 @@
       "name": "Return Silent Or Reset Hint",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [720, 160],
+      "position": [
+        720,
+        160
+      ],
       "notes": "Terminal no-send branch for already-escalated internal test threads."
     },
     {
@@ -165,8 +201,14 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{$env.OPENAI_API_KEY}}" },
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
@@ -178,7 +220,10 @@
       "name": "Create Internal Query Embedding",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, -120],
+      "position": [
+        720,
+        -120
+      ],
       "notes": "Creates the query embedding for Supabase pgvector retrieval."
     },
     {
@@ -188,21 +233,33 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "apikey", "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}" },
-            { "name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}" },
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "apikey",
+              "value": "={{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.SUPABASE_SECRET_KEY || $env.SUPABASE_PUBLISHABLE_KEY || $env.SUPABASE_ANON_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { p_tenant_id: $('Normalize Internal Test Request').first().json.tenant_id, query_embedding: $json.data[0].embedding, match_count: Number($env.SUPABASE_MATCH_COUNT || 5), min_similarity: Number($env.SUPABASE_MIN_SIMILARITY || 0.1) } }}",
+        "jsonBody": "={{ { p_tenant_id: $('Normalize Internal Test Request').first().json.tenant_id, query_embedding: $json.data[0].embedding, match_count: Number($env.SUPABASE_MATCH_COUNT || 5), min_similarity: Math.max(0.05, Math.min(Number($env.SUPABASE_MIN_SIMILARITY || 0.10), 0.30)) } }}",
         "options": {}
       },
       "id": "internal-match-documents",
       "name": "Match Internal Documents",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [960, -120],
+      "position": [
+        960,
+        -120
+      ],
       "notes": "Retrieves private company memory from native Supabase pgvector. No local vector store and no S3/AWS vector wrapper."
     },
     {
@@ -213,7 +270,10 @@
       "name": "Build Internal Prompt Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, -120],
+      "position": [
+        1200,
+        -120
+      ],
       "notes": "Builds a compact prompt context and confidence score from retrieved chunks."
     },
     {
@@ -223,20 +283,29 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{$env.OPENAI_API_KEY}}" },
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { model: $env.OPENAI_CHAT_MODEL || $env.OPENAI_MODEL || 'gpt-4o-mini', temperature: 0.2, messages: [ { role: 'system', content: 'You are the internal channel-free test harness for the company Instagram DM assistant. Answer from retrieved company context. If unsupported or sensitive, say a human operator should review it.' }, { role: 'user', content: 'Retrieved context:\n' + $json.context + '\n\nIncoming message:\n' + $json.message_text } ] } }}",
+        "jsonBody": "={{ { model: $env.OPENAI_CHAT_MODEL || $env.OPENAI_MODEL || 'gpt-4o-mini', temperature: 0.2, messages: [ { role: 'system', content: 'You are the official Sell.Systems inbound sales assistant test harness. Use retrieved company context to sell and qualify inbound leads. If services, packages, audits, quote logic, or pricing guidance appear in context, answer with those details and recommend the next step. If exact pricing is missing, say pricing depends on scope and ask one or two qualification questions. Escalate only for explicit human handoff, legal/refund/complaint, sensitive account-specific issues, or no useful context. Reply in the customer language. Keep it concise and practical.' }, { role: 'user', content: 'Customer message:\\n' + $json.message_text + '\\n\\nRetrieved company context:\\n' + ($json.context || 'No context') } ] } }}",
         "options": {}
       },
       "id": "internal-generate-reply",
       "name": "Generate Internal Reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1440, -120],
+      "position": [
+        1440,
+        -120
+      ],
       "notes": "Generates a response without sending it to any external channel."
     },
     {
@@ -247,22 +316,139 @@
       "name": "Return Internal Answer",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1680, -120],
+      "position": [
+        1680,
+        -120
+      ],
       "notes": "Terminal response for internal n8n webhook callers."
     }
   ],
   "pinData": {},
   "connections": {
-    "Internal Test Webhook": { "main": [[{ "node": "Normalize Internal Test Request", "type": "main", "index": 0 }]] },
-    "Normalize Internal Test Request": { "main": [[{ "node": "Is Authorized Internal Test", "type": "main", "index": 0 }]] },
-    "Is Authorized Internal Test": { "main": [[{ "node": "Get Internal Thread State", "type": "main", "index": 0 }], [{ "node": "Return Unauthorized", "type": "main", "index": 0 }]] },
-    "Get Internal Thread State": { "main": [[{ "node": "Build State Decision", "type": "main", "index": 0 }]] },
-    "Build State Decision": { "main": [[{ "node": "Internal Process Gate", "type": "main", "index": 0 }]] },
-    "Internal Process Gate": { "main": [[{ "node": "Create Internal Query Embedding", "type": "main", "index": 0 }], [{ "node": "Return Silent Or Reset Hint", "type": "main", "index": 0 }]] },
-    "Create Internal Query Embedding": { "main": [[{ "node": "Match Internal Documents", "type": "main", "index": 0 }]] },
-    "Match Internal Documents": { "main": [[{ "node": "Build Internal Prompt Context", "type": "main", "index": 0 }]] },
-    "Build Internal Prompt Context": { "main": [[{ "node": "Generate Internal Reply", "type": "main", "index": 0 }]] },
-    "Generate Internal Reply": { "main": [[{ "node": "Return Internal Answer", "type": "main", "index": 0 }]] }
+    "Internal Test Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Internal Test Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Internal Test Request": {
+      "main": [
+        [
+          {
+            "node": "Is Authorized Internal Test",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Authorized Internal Test": {
+      "main": [
+        [
+          {
+            "node": "Get Internal Thread State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Internal Thread State": {
+      "main": [
+        [
+          {
+            "node": "Build State Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build State Decision": {
+      "main": [
+        [
+          {
+            "node": "Internal Process Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Internal Process Gate": {
+      "main": [
+        [
+          {
+            "node": "Create Internal Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Silent Or Reset Hint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Internal Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Match Internal Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Internal Documents": {
+      "main": [
+        [
+          {
+            "node": "Build Internal Prompt Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Internal Prompt Context": {
+      "main": [
+        [
+          {
+            "node": "Generate Internal Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Internal Reply": {
+      "main": [
+        [
+          {
+            "node": "Return Internal Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "active": false,
   "settings": {

@@ -54,7 +54,7 @@ create table if not exists public.tenant_settings (
   language text default 'en',
   response_style text,
   escalation_target text,
-  confidence_threshold numeric not null default 0.40,
+  confidence_threshold numeric not null default 0.30,
   updated_at timestamptz not null default now()
 );
 
@@ -67,7 +67,7 @@ drop function if exists public.match_documents(vector, integer, double precision
 create or replace function public.match_documents(
   query_embedding vector(1536),
   match_count int default 5,
-  min_similarity float default 0.35,
+  min_similarity float default 0.10,
   p_tenant_id text default null
 )
 returns table(
@@ -102,7 +102,7 @@ create or replace function public.match_documents_with_context(
   p_channel text default 'instagram',
   p_message_text text default null,
   match_count int default 5,
-  min_similarity float default 0.35
+  min_similarity float default 0.10
 )
 returns table(
   id uuid,
@@ -192,7 +192,7 @@ select
   coalesce(ts.language, 'en') as language,
   coalesce(ts.response_style, 'concise, practical, and polite') as response_style,
   coalesce(ts.escalation_target, 'human operator') as escalation_target,
-  coalesce(ts.confidence_threshold, 0.40) as confidence_threshold
+  coalesce(ts.confidence_threshold, 0.30) as confidence_threshold
 from public.tenant_settings ts
 where ts.tenant_id = p_tenant_id
 union all
@@ -202,7 +202,7 @@ select
   'en',
   'concise, practical, and polite',
   'human operator',
-  0.40::numeric
+  0.30::numeric
 where not exists (
   select 1 from public.tenant_settings ts where ts.tenant_id = p_tenant_id
 )

@@ -72,10 +72,52 @@ function maxSimilarity(matches) {
   return matches.reduce((max, row) => Math.max(max, Number(row.similarity || 0)), 0);
 }
 
-function shouldEscalate(message, confidence, threshold) {
+function hasHardEscalationSignal(message) {
   const normalized = String(message || '').toLowerCase();
-  const explicit = /\b(human|operator|manager|escalate|complaint|refund|legal|lawyer|angry|urgent|call me|real person|human agent|live agent|support person)\b/.test(normalized);
-  return explicit || confidence < threshold;
+  return /\b(human|operator|manager|escalate|complaint|refund|legal|lawyer|angry|urgent|call me|real person|human agent|live agent|support person)\b/.test(normalized);
+}
+
+function hasSalesIntent(message) {
+  const normalized = String(message || '').toLowerCase();
+  return /\b(price|pricing|cost|package|packages|offer|offers|service|services|sell|buy|quote|proposal|instagram|automation|dm|lead|leads|audit|workflow|crm|bot|chatbot|sales)\b/.test(normalized);
+}
+
+function hasSalesCriticalContext(matches) {
+  return (Array.isArray(matches) ? matches : []).some((match) => {
+    const haystack = [match.source_key, match.source_type, match.chunk_text].join(' ').toLowerCase();
+    return /private_bot_memory|company_identity|services?|offers?|fixed_price|price|pricing|quote|package|sales|playbook|qualification|scoping|dialogue|objection/.test(haystack);
+  });
+}
+
+function shouldEscalate(message, confidence, threshold, matches = []) {
+  const hardHandoff = hasHardEscalationSignal(message);
+  const salesIntent = hasSalesIntent(message);
+  const salesContext = hasSalesCriticalContext(matches);
+  const answerableNearThreshold = matches.length > 0 && confidence >= Math.max(0.28, threshold - 0.12);
+  const salesContextOverride = salesIntent && salesContext && confidence >= 0.28;
+
+  if (hardHandoff) {
+    return { escalate: true, reason: 'explicit_handoff_request', sales_intent: salesIntent, sales_context: salesContext };
+  }
+
+  if (matches.length === 0) {
+    return { escalate: true, reason: 'no_retrieved_context', sales_intent: salesIntent, sales_context: salesContext };
+  }
+
+  if (salesContextOverride) {
+    return { escalate: false, reason: 'sales_context_override', sales_intent: salesIntent, sales_context: salesContext };
+  }
+
+  if (answerableNearThreshold) {
+    return { escalate: false, reason: 'near_threshold_with_context', sales_intent: salesIntent, sales_context: salesContext };
+  }
+
+  return {
+    escalate: confidence < threshold,
+    reason: confidence < threshold ? 'low_rag_confidence' : 'answerable_confidence',
+    sales_intent: salesIntent,
+    sales_context: salesContext,
+  };
 }
 
 function sourceLabel(row) {
@@ -197,8 +239,9 @@ async function main() {
   });
 
   const confidence = maxSimilarity(Array.isArray(matches) ? matches : []);
-  const threshold = Number(process.env.RAG_CONFIDENCE_THRESHOLD || tenantSettings?.confidence_threshold || 0.25);
-  const escalate = shouldEscalate(args.message, confidence, threshold);
+  const threshold = Number(process.env.RAG_CONFIDENCE_THRESHOLD || tenantSettings?.confidence_threshold || 0.30);
+  const decision = shouldEscalate(args.message, confidence, threshold, Array.isArray(matches) ? matches : []);
+  const escalate = decision.escalate;
 
   if (args.log) {
     await requestJson(`${restBase}/conversation_events`, {
@@ -229,8 +272,8 @@ async function main() {
         p_tenant_id: tenant,
         p_channel: channel,
         p_thread_id: thread,
-        p_reason: confidence < threshold ? 'low_rag_confidence' : 'explicit_handoff_request',
-        p_metadata: { source: 'internal_bot_test', confidence, threshold },
+        p_reason: decision.reason || (confidence < threshold ? 'low_rag_confidence' : 'explicit_handoff_request'),
+        p_metadata: { source: 'internal_bot_test', confidence, threshold, decision },
       }),
     });
   } else {
@@ -249,9 +292,12 @@ async function main() {
           {
             role: 'system',
             content: [
-              `You are the internal test harness for ${tenantSettings?.brand_name || 'the company'} Instagram DM assistant.`,
-              'Answer only from retrieved company context when possible.',
-              'If the answer is not supported or needs a human, say that a human operator should review it.',
+              `You are the official ${tenantSettings?.brand_name || 'Sell.Systems'} inbound sales assistant test harness for Instagram DM.`,
+              'Use retrieved company context to sell and qualify inbound leads.',
+              'If services, packages, audits, quote logic, or pricing guidance appear in context, answer with those details and recommend the next step.',
+              'If exact pricing is missing, say pricing depends on scope and ask one or two qualification questions.',
+              'Escalate only for explicit human handoff, legal/refund/complaint issues, sensitive account-specific cases, or no useful context.',
+              'Reply in the customer language. Keep it concise, practical, and sales-oriented.',
               'Do not mention this is an internal test unless the user asks.',
             ].join(' '),
           },
@@ -281,7 +327,7 @@ async function main() {
         matched_document_ids: (Array.isArray(matches) ? matches : []).map((row) => row.id).filter(Boolean),
         model_name: escalate ? 'handoff_rule' : (process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini'),
         escalated: escalate,
-        raw_event: { source: 'internal_bot_test', thread_state: escalate ? 'escalated' : 'bot_active' },
+        raw_event: { source: 'internal_bot_test', thread_state: escalate ? 'escalated' : 'bot_active', decision },
       }),
     });
   }
@@ -294,6 +340,9 @@ async function main() {
     thread_id: thread,
     confidence,
     threshold,
+    decision_reason: decision.reason,
+    sales_intent: decision.sales_intent,
+    sales_context: decision.sales_context,
     response,
     matched_sources: (Array.isArray(matches) ? matches : []).slice(0, matchCount).map((row) => ({
       source_key: row.source_key,
