@@ -79,7 +79,7 @@ function hasHardEscalationSignal(message) {
 
 function hasSalesIntent(message) {
   const normalized = String(message || '').toLowerCase();
-  return /\b(price|pricing|cost|package|packages|offer|offers|service|services|sell|buy|quote|proposal|instagram|automation|dm|lead|leads|audit|workflow|crm|bot|chatbot|sales)\b/.test(normalized);
+  return /\b(price|pricing|cost|package|packages|offer|offers|service|services|sell|buy|quote|proposal|instagram|automation|dm|lead|leads|audit|workflow|crm|bot|chatbot|sales|business|website|payment|payments|content|marketplace|support|process|system)\b|цена|цены|прайс|стоим|сколько|пакет|пакеты|услуг|сервис|предлож|аудит|автоматизац|бот|инстаграм|телеграм|сайт|crm|црм|оплат|лид|лиды|продаж|контент|маркетплейс|бизнес|проблем|процесс|система|поддержк|что вы можете|чем помог/i.test(normalized);
 }
 
 function hasSalesCriticalContext(matches) {
@@ -279,6 +279,7 @@ async function main() {
   } else {
     const chatModel = process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
     const context = buildContext(Array.isArray(matches) ? matches.slice(0, matchCount) : []);
+    const customerLanguage = /[А-Яа-яЁё]/.test(args.message || '') ? 'Russian' : 'English';
     const priorMessages = Array.isArray(threadContext)
       ? threadContext.map((event) => `${event.role}: ${event.content}`).join('\n')
       : '';
@@ -293,17 +294,21 @@ async function main() {
             role: 'system',
             content: [
               `You are the official ${tenantSettings?.brand_name || 'Sell.Systems'} inbound sales assistant test harness for Instagram DM.`,
+              `Required output language: ${customerLanguage}. This overrides retrieved context language.`,
               'Use retrieved company context to sell and qualify inbound leads.',
               'If services, packages, audits, quote logic, or pricing guidance appear in context, answer with those details and recommend the next step.',
-              'If exact pricing is missing, say pricing depends on scope and ask one or two qualification questions.',
+    'Treat every inbound interest as sales discovery: if the customer asks about automation, AI, bots, Instagram, Telegram, CRM, websites, payments, leads, content, marketplaces, operations, support, pricing, or business problems, connect it to relevant Sell.Systems offers from context, explain the practical outcome, recommend the smallest useful next step, and ask one specific qualifying question.',
+    'If the user asks about prices, packages, services, costs, quotes, budgets, or what Sell.Systems offers, and the retrieved context contains fixed prices, anchor prices, currency amounts, packages, product names, or offer tables, name the relevant amounts directly in the context currency before saying details may vary.',
+    'For broad pricing questions, give a compact menu of the most relevant retrieved offers instead of a vague depends answer.',
+    'If exact pricing is missing from retrieved context, say pricing depends on scope and ask one or two qualification questions.',
               'Escalate only for explicit human handoff, legal/refund/complaint issues, sensitive account-specific cases, or no useful context.',
-              'Reply in the customer language. Keep it concise, practical, and sales-oriented.',
+              'Reply in the same language as the latest customer message. Do not switch language because retrieved context is written in another language. Keep it concise, practical, and sales-oriented.',
               'Do not mention this is an internal test unless the user asks.',
             ].join(' '),
           },
           {
             role: 'user',
-            content: `Recent thread context:\n${priorMessages || '(none)'}\n\nRetrieved company context:\n${context || '(none)'}\n\nIncoming message:\n${args.message}`,
+            content: `Required output language: ${customerLanguage}\n\nRecent thread context:\n${priorMessages || '(none)'}\n\nRetrieved company context:\n${context || '(none)'}\n\nIncoming message:\n${args.message}`,
           },
         ],
       }),
