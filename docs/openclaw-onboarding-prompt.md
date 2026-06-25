@@ -144,4 +144,4 @@ echo "preflight-ok"
 - Supabase project URL: `https://<your-project-ref>.supabase.co`
 - Supabase project id/ref: `<your-supabase-project-ref>`
 - Supabase region: `us-west-2`
-- Instagram app label: `NDRD_i+api-IG`
+- Instagram app label: `<your-instagram-app-label>`

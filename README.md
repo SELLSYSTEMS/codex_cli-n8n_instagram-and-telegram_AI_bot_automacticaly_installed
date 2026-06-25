@@ -1,128 +1,95 @@
-# Instagram DM + RAG n8n Starter
+# Multi-channel n8n RAG Bot Template
 
-This repo documents and stores the OpenClaw/Codex-CLI workflow pack for a production-ready Instagram DM assistant using n8n + Supabase vector memory.
+Public starter for a reusable AI assistant that receives customer messages from Instagram, Telegram, WhatsApp, or an internal test endpoint, retrieves company knowledge from Supabase `pgvector`, generates a grounded answer with OpenAI, logs memory, and respects escalation state.
 
-## Purpose
+This repository is a template. It must not contain company-private knowledge, customer data, or live credentials.
 
-- Keep everything needed for fast re-installation by future AI agents.
-- Store clear n8n workflow artifacts for:
-  - Instagram DM intake + RAG response flow
-  - documentation/knowledge upload flow
-- Keep credentials in `.env` only (not committed).
-- Keep all vector memory in Supabase-native `pgvector` only (no AWS/S3 wrapper path in this architecture).
+## Architecture
 
-## Quick start
+Runtime flow:
 
-1. Create a local `.env` file with required runtime values. Do not commit it.
-2. Import both workflow exports into n8n:
-   - `workflows/demo-rag-instagram-supabase.json`
-   - `workflows/knowledge-upload-to-supabase.json`
-3. Configure environment bindings in n8n (or n8n container env) for:
-   - OpenAI
-   - Supabase access via REST (if using API calls)
-4. Run `schemas/supabase.sql` in your Supabase SQL editor and verify Postgres objects exist.
-5. Configure webhook URLs in Meta for `instagram-webhook` and `knowledge-upload` paths.
-6. Use `docs/architecture.md` and `docs/runbook.md` for the implementation/ops sequence.
-7. If your n8n instance allows API-based deployment, run:
-   - `./scripts/sync-workflows.sh`
-
-## One-shot OpenClaw/Codex onboarding
-
-The intended bootstrap flow is:
-
-1. one deterministic prompt to OpenClaw/Codex,
-2. local `.env` values loaded,
-3. `./scripts/sync-workflows.sh` executes,
-4. Meta webhook GET challenge is validated,
-5. smoke tests pass,
-6. `Demo: RAG in n8n` is activated only after successful verification.
-
-## Required domains and names
-
-- n8n URL: `https://<your-n8n-domain>`
-- Workflow target name: `Demo: RAG in n8n`
-- KB workflow name: `Knowledge Upload to Supabase`
-- Webhook endpoints:
-  - `https://<your-n8n-domain>/webhook/instagram-webhook`
-  - `https://<your-n8n-domain>/webhook/knowledge-upload`
-
-## Hard constraints
-
-- Do not touch host infrastructure in this repository scope (SSH, SSL certs, WireGuard, firewall/service config).
-- Do not store real secrets in git.
-- Supabase is the only vector store and source of truth for memory.
-- No external vector services for RAG in this repo (including AWS/S3 wrappers).
-- Keep user-facing workflow labels, names, and paths stable across re-installs.
-- Do not add AWS/S3 vector wrappers; Supabase pgvector is the only RAG memory backend.
-
-## Repository structure
-
-- `workflows/`  
-  n8n workflow JSON exports used for imports.
-- `schemas/`  
-  Supabase schema SQL for pgvector + conversation memory.
-- `docs/`  
-  Operational playbooks and architecture notes.
-- `AGENTS.md`  
-  Repo-specific guardrails and safety constraints.
-- `SKILL.md`  
-  Deterministic automation instructions for OpenClaw/Codex re-install.
-
-## Local secret handling contract
-
-- Populate local `.env` with runtime secrets only (do not commit).
-- `.env` must remain ignored by git (`.env` and `.env.*` are already in `.gitignore`).
-- `.obsidian/SESSION_MEMORY.md` is local working-memory only (also ignored via `.obsidian/`).
-
-## OpenClaw/Codex one-shot contract
-
-- Use one bootstrap instruction block:
-  - `scripts/sync-workflows.sh`
-  - `./scripts/check-runtime-prereqs.sh`
-  - webhook verify on `Demo: RAG in n8n`
-  - one knowledge upload smoke test
-  - one simulated inbound DM smoke test
-- Do not activate `Demo: RAG in n8n` until verification + smoke tests pass.
-
-## Current runtime status - 2026-06-18
-
-The public demo is configured for safe smoke testing by default. `Demo: RAG in n8n` is active and the Instagram webhook path runs the full inbound path through normalization, intent classification, OpenAI embeddings, Supabase pgvector retrieval, escalation logic, and Supabase conversation logging.
-
-Live Instagram sending is gated by `IG_ENABLE_LIVE_SEND`. Keep it set to `false` for repository demos and synthetic webhook tests. Set it to `true` only after `IG_ACCESS_TOKEN` and `IG_INSTAGRAM_BUSINESS_ACCOUNT_ID` are configured in `.env`, then resync the workflow with `./scripts/sync-workflows.sh`.
-
-Verified state:
-- Supabase schema and RPCs are applied in project `<your-supabase-project-ref>`.
-- Knowledge upload webhook writes chunks into `public.documents` using native pgvector.
-- Main Instagram workflow writes user and assistant events into `public.conversation_events`.
-- No AWS/S3 vector path is used for RAG.
-
-## Current setup guides
-
-- `docs/instagram-setup.md` documents the Instagram-first production path.
-- `docs/operator-escalation.md` documents the one-time escalation marker and reset flow.
-- `docs/roadmap.md` documents the path from private proof of concept to public template.
-- `docs/public-template-strategy.md` documents what belongs in the public repo versus private runtime memory.
-
-Repository rename note: the intended public repo name is `<your-github-owner>/<your-repo-name>`, with Instagram as the first completed channel and Telegram as a later roadmap channel.
-
-## Internal bot testing
-
-Use the channel-free bot test harness before testing Instagram or Telegram:
-
-```bash
-node scripts/internal-bot-test.mjs --thread local-sales-test-001 --message "What can you build for Instagram automation?"
+```text
+Channel webhook
+-> channel adapter normalization
+-> shared RAG bot core
+-> Supabase tenant settings, thread state, conversation memory, vector retrieval
+-> OpenAI response generation
+-> channel adapter outbound send
+-> Supabase logging and escalation analytics
 ```
 
-Run the full autonomous regression suite before live channel QA:
+Current workflow exports:
+
+- `workflows/demo-rag-instagram-supabase.json` - Instagram adapter plus shared bot flow.
+- `workflows/telegram-rag-channel-adapter.json` - Telegram adapter into the shared core.
+- `workflows/whatsapp-rag-channel-adapter.json` - WhatsApp Cloud API adapter into the shared core.
+- `workflows/internal-rag-bot-test-harness.json` - fast internal smoke-test endpoint without any external channel.
+- `workflows/knowledge-upload-to-supabase.json` - company knowledge upload and embedding pipeline.
+
+Supabase is the only vector store and memory source in this template. Do not use AWS/S3 vector wrappers or external vector services for RAG.
+
+## Required services
+
+- n8n self-hosted or cloud instance.
+- Supabase project with `vector` extension enabled.
+- OpenAI API key for embeddings and chat completion.
+- At least one channel credential: Instagram, Telegram, or WhatsApp.
+
+## Required environment variables
+
+Keep real values in `.env` only. Commit placeholders only.
 
 ```bash
-node scripts/internal-bot-regression-suite.mjs --thread local-regression
+N8N_BASE_URL=https://your-n8n-domain.example
+N8N_API_KEY=replace_me
+INTERNAL_TEST_TOKEN=replace_me
+
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=replace_me
+OPENAI_API_KEY=replace_me
+
+IG_WEBHOOK_VERIFY_TOKEN=replace_me
+IG_ACCESS_TOKEN=replace_me
+IG_ENABLE_LIVE_SEND=false
+
+TELEGRAM_BOT_TOKEN=replace_me
+
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=replace_me
+WHATSAPP_ACCESS_TOKEN=replace_me
+WHATSAPP_PHONE_NUMBER_ID=replace_me
+META_GRAPH_VERSION=v25.0
 ```
 
-See `docs/internal-bot-testing.md` and `docs/autonomous-testing.md` for escalation silence tests, reset commands, and regression criteria.
+## Setup
 
-Reusable import/export artifacts are documented in `docs/import-export.md`.
+1. Apply `schemas/supabase.sql` to the Supabase project.
+2. Import the workflow JSON files into n8n, or run `scripts/sync-workflows.sh` with `N8N_BASE_URL` and `N8N_API_KEY` set.
+3. Activate the workflows.
+4. Configure channel webhooks:
 
-## Public template boundary
+```text
+Instagram: https://your-n8n-domain.example/webhook/instagram-rag-webhook
+Telegram: use the Telegram trigger/adapter workflow for the bot token
+WhatsApp: https://your-n8n-domain.example/webhook/whatsapp-rag-webhook
+Knowledge upload: https://your-n8n-domain.example/webhook/knowledge-upload
+Internal test: https://your-n8n-domain.example/webhook/internal-rag-test
+```
 
-This repository is a reusable public template. Keep company-specific runtime data in the target n8n/Supabase environment, not in Git. See `docs/template-vs-private-runtime.md` and run `node scripts/audit-public-template-safety.mjs` before committing.
+5. Upload company knowledge through the knowledge workflow before judging answer quality.
+6. Run the internal test endpoint first, then test live channels.
+
+## Bot behavior contract
+
+The shared core should:
+
+- Preserve context across turns using Supabase conversation memory.
+- Retrieve knowledge semantically through Supabase vectors.
+- Answer naturally in the customer's language.
+- Use USD by default unless the customer requests another currency or the local context clearly requires one.
+- Sell consultatively: discover needs, connect them to relevant automation/AI/CRM/support/content workflows, and propose the next step.
+- Avoid canned templates and repeated generic replies.
+- Escalate only when needed, then stay silent until an operator resets the thread state.
+
+## Public-template boundary
+
+Company-specific prompts, prices, offers, policies, and knowledge belong in Supabase documents or tenant settings for that company. They do not belong hard-coded in this public repo.

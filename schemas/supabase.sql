@@ -478,3 +478,233 @@ begin
   );
 end;
 $$;
+
+-- Channel-neutral identity layer for multi-channel bots.
+-- This is additive and keeps existing Instagram-specific columns/functions compatible.
+-- Human operators may link identities; the bot should not auto-merge Instagram and Telegram users by username alone.
+
+create table if not exists public.contacts (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text not null,
+  display_name text,
+  primary_language text,
+  lifecycle_stage text not null default 'lead',
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.contact_identities (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text not null,
+  contact_id uuid not null references public.contacts(id) on delete cascade,
+  channel text not null,
+  external_user_id text not null,
+  external_thread_id text,
+  username text,
+  display_name text,
+  confidence numeric not null default 1.0 check (confidence >= 0 and confidence <= 1),
+  verified_by text not null default 'operator',
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (tenant_id, channel, external_user_id)
+);
+
+alter table public.conversation_events
+  add column if not exists thread_id text,
+  add column if not exists external_user_id text,
+  add column if not exists contact_id uuid;
+
+update public.conversation_events
+set thread_id = coalesce(thread_id, instagram_thread_id)
+where thread_id is null and instagram_thread_id is not null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'conversation_events_contact_id_fkey'
+      and conrelid = 'public.conversation_events'::regclass
+  ) then
+    alter table public.conversation_events
+      add constraint conversation_events_contact_id_fkey
+      foreign key (contact_id) references public.contacts(id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists contacts_tenant_stage_idx
+  on public.contacts (tenant_id, lifecycle_stage, updated_at desc);
+
+create index if not exists contact_identities_contact_idx
+  on public.contact_identities (tenant_id, contact_id, channel);
+
+create index if not exists contact_identities_lookup_idx
+  on public.contact_identities (tenant_id, channel, external_user_id);
+
+create index if not exists conversation_events_channel_thread_idx
+  on public.conversation_events (tenant_id, channel, thread_id, created_at desc)
+  where thread_id is not null;
+
+create index if not exists conversation_events_channel_external_user_idx
+  on public.conversation_events (tenant_id, channel, external_user_id, created_at desc)
+  where external_user_id is not null;
+
+create index if not exists conversation_events_contact_idx
+  on public.conversation_events (tenant_id, contact_id, created_at desc)
+  where contact_id is not null;
+
+comment on table public.contacts is 'Channel-neutral lead/customer records. Do not auto-merge identities without operator verification.';
+comment on table public.contact_identities is 'Maps external channel identities such as Instagram IG user IDs and Telegram user IDs to contacts.';
+comment on column public.conversation_events.thread_id is 'Channel-neutral thread identifier. For legacy Instagram rows this mirrors instagram_thread_id.';
+comment on column public.conversation_events.external_user_id is 'Channel-neutral sender/user ID from the source platform.';
+comment on column public.conversation_events.contact_id is 'Optional operator-verified contact link shared across channels.';
+
+create or replace function public.get_channel_thread_context(
+  p_tenant_id text,
+  p_channel text,
+  p_thread_id text,
+  p_limit integer default 10
+)
+returns table (
+  id uuid,
+  channel text,
+  thread_id text,
+  direction text,
+  role text,
+  message_text text,
+  confidence numeric,
+  escalation_required boolean,
+  created_at timestamptz,
+  raw_event jsonb
+)
+language sql
+stable
+as $$
+  select
+    ce.id,
+    ce.channel,
+    coalesce(ce.thread_id, ce.instagram_thread_id) as thread_id,
+    ce.direction,
+    ce.role,
+    ce.message_text,
+    ce.confidence,
+    ce.escalation_required,
+    ce.created_at,
+    ce.raw_event
+  from public.conversation_events ce
+  where ce.tenant_id = p_tenant_id
+    and ce.channel = p_channel
+    and coalesce(ce.thread_id, ce.instagram_thread_id) = p_thread_id
+  order by ce.created_at desc
+  limit greatest(p_limit, 1);
+$$;
+
+create or replace function public.resolve_contact_identity(
+  p_tenant_id text,
+  p_channel text,
+  p_external_user_id text
+)
+returns jsonb
+language sql
+stable
+as $$
+  select coalesce(
+    jsonb_build_object(
+      'contact_id', c.id,
+      'tenant_id', c.tenant_id,
+      'display_name', c.display_name,
+      'primary_language', c.primary_language,
+      'lifecycle_stage', c.lifecycle_stage,
+      'identity', jsonb_build_object(
+        'channel', ci.channel,
+        'external_user_id', ci.external_user_id,
+        'external_thread_id', ci.external_thread_id,
+        'username', ci.username,
+        'display_name', ci.display_name,
+        'confidence', ci.confidence,
+        'verified_by', ci.verified_by
+      )
+    ),
+    '{}'::jsonb
+  )
+  from public.contact_identities ci
+  join public.contacts c on c.id = ci.contact_id
+  where ci.tenant_id = p_tenant_id
+    and ci.channel = p_channel
+    and ci.external_user_id = p_external_user_id
+  limit 1;
+$$;
+
+create or replace function public.link_contact_identity(
+  p_tenant_id text,
+  p_channel text,
+  p_external_user_id text,
+  p_external_thread_id text default null,
+  p_username text default null,
+  p_display_name text default null,
+  p_contact_id uuid default null,
+  p_verified_by text default 'operator',
+  p_confidence numeric default 1.0,
+  p_metadata jsonb default '{}'::jsonb
+)
+returns uuid
+language plpgsql
+as $$
+declare
+  v_contact_id uuid := p_contact_id;
+begin
+  if p_external_user_id is null or length(trim(p_external_user_id)) = 0 then
+    raise exception 'p_external_user_id is required';
+  end if;
+
+  if v_contact_id is null then
+    insert into public.contacts (tenant_id, display_name, metadata)
+    values (p_tenant_id, p_display_name, jsonb_build_object('created_from_channel', p_channel))
+    returning id into v_contact_id;
+  else
+    update public.contacts
+    set updated_at = now(),
+        display_name = coalesce(public.contacts.display_name, p_display_name)
+    where id = v_contact_id and tenant_id = p_tenant_id;
+  end if;
+
+  insert into public.contact_identities (
+    tenant_id,
+    contact_id,
+    channel,
+    external_user_id,
+    external_thread_id,
+    username,
+    display_name,
+    confidence,
+    verified_by,
+    metadata
+  )
+  values (
+    p_tenant_id,
+    v_contact_id,
+    p_channel,
+    p_external_user_id,
+    p_external_thread_id,
+    p_username,
+    p_display_name,
+    least(greatest(coalesce(p_confidence, 1.0), 0), 1),
+    coalesce(p_verified_by, 'operator'),
+    coalesce(p_metadata, '{}'::jsonb)
+  )
+  on conflict (tenant_id, channel, external_user_id)
+  do update set
+    contact_id = excluded.contact_id,
+    external_thread_id = coalesce(excluded.external_thread_id, public.contact_identities.external_thread_id),
+    username = coalesce(excluded.username, public.contact_identities.username),
+    display_name = coalesce(excluded.display_name, public.contact_identities.display_name),
+    confidence = excluded.confidence,
+    verified_by = excluded.verified_by,
+    metadata = public.contact_identities.metadata || excluded.metadata,
+    updated_at = now();
+
+  return v_contact_id;
+end;
+$$;

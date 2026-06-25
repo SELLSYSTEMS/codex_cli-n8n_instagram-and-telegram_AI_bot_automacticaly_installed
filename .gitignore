@@ -1,6 +1,7 @@
 .env
 .env.*
 *.log
+.private/
 node_modules/
 dist/
 .DS_Store
@@ -8,3 +9,5 @@ dist/
 
 # Local-only AI/operator memory. Do not publish.
 local-obsidian-memory/
+
+.agent-memory/

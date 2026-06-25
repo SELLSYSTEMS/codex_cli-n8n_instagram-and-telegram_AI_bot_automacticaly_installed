@@ -1,89 +1,82 @@
-# Architecture: Instagram DM RAG in n8n
+# Architecture
 
-## Stable artifact naming
+## Goal
 
-- Bot workflow: `Demo: RAG in n8n`
-- Ingest workflow: `Knowledge Upload to Supabase`
-- Webhook paths:
-  - `instagram-webhook`
-  - `knowledge-upload`
+Provide a reusable n8n + Supabase + OpenAI assistant template that can be installed by future AI agents and adapted for any company. The public repo contains workflow structure, schema, runbooks, and safe placeholders only. Company data lives in Supabase and environment variables.
 
-## Components
+## Runtime topology
 
-- `Demo: RAG in n8n`
-  - Webhook trigger at path `/webhook/instagram-webhook`
-  - Message normalization + intent routing
-  - Embedding + pgvector retrieval via RPC
-  - Grounded LLM generation
-  - Instagram send path + conversation logging
-- `Knowledge Upload to Supabase`
-  - Ingest endpoint at `/webhook/knowledge-upload`
-  - Payload normalization and chunking
-  - OpenAI embedding generation
-  - Upsert into `documents`
+```text
+Instagram / Telegram / WhatsApp / internal test
+-> channel adapter
+-> normalized message contract
+-> shared RAG bot core
+-> Supabase memory + state + vector retrieval
+-> OpenAI generation
+-> outbound channel adapter
+-> Supabase event log
+```
 
-## Supabase-native memory architecture
+## Normalized message contract
 
-- `documents`
-  - raw chunk text and `vector(1536)` embeddings
-  - metadata and tenant scope
-- `conversation_events`
-  - message-level logs for user + assistant turns
-  - confidence and escalation flags
-- `tenant_settings`
-  - per-tenant policy/style/config
-- SQL functions:
-  - `match_documents`
-  - `match_documents_with_context`
-- No S3/AWS vector wrapper path is used in this repo.
+Every channel adapter should send the shared core these fields:
 
-## Data boundaries
+```json
+{
+  "tenant_id": "demo",
+  "channel": "instagram|telegram|whatsapp|internal_test",
+  "thread_id": "stable-channel-thread-id",
+  "sender_id": "external-user-id",
+  "sender_name": "optional display name",
+  "message_id": "external-message-id",
+  "message_text": "customer text",
+  "raw_event": {}
+}
+```
 
-- Tenant context is propagated on every row as `tenant_id`.
-- No user raw payload is persisted outside of execution logs:
-  - OpenAI receives content for inference
-  - Instagram receives only generated reply payload
+This keeps the bot brain channel-independent and makes internal testing faster than repeatedly sending live DMs.
+
+## Supabase responsibilities
+
+Supabase is the system of record for:
+
+- `documents` - RAG chunks and `pgvector` embeddings.
+- `conversation_events` - user/assistant messages and analytics.
+- `tenant_settings` - company-level runtime settings.
+- `thread_states` - escalation/mute/bot-active state per tenant/channel/thread.
+
+Use native Supabase/Postgres `pgvector`. Do not add AWS/S3 vector wrappers to this flow.
+
+## Escalation behavior
+
+`thread_states` controls whether the bot should answer.
+
+- `bot_active`: normal autonomous replies.
+- `escalated`: bot stays silent after handoff until reset by an operator.
+- `muted`: bot does not reply.
+
+Operator reset should update the thread back to `bot_active` and clear escalation metadata. This prevents the bot from repeating the same handoff message every time the customer writes again.
+
+## n8n AI Agent direction
+
+n8n's native AI Agent and LangChain nodes are useful for future versions because they support tools, memory, and direct vector-store connections. The current template still keeps an explicit shared core with HTTP/OpenAI/Supabase calls because it gives us:
+
+- deterministic channel-independent input/output contracts;
+- direct Supabase RPC control for tenant filters and escalation state;
+- simple internal smoke tests without a live channel;
+- workflow exports that are easy for another AI agent to import and patch;
+- a clean migration path to native AI Agent nodes once behavior parity is proven.
+
+Recommended next native-agent migration:
+
+1. Keep the channel adapters unchanged.
+2. Replace the current LLM generation section inside the shared core with an AI Agent node.
+3. Attach Supabase Vector Store as a retrieval tool.
+4. Attach Postgres/Supabase-backed memory with a stable session key of `tenant_id:channel:thread_id`.
+5. Keep explicit `thread_states` checks outside the agent so escalation safety is deterministic.
 
 ## Scaling notes
 
-- `Webhook` trigger supports queue mode in n8n worker mode for production.
-- Indexing pattern targets `ivfflat (embedding vector_cosine_ops)` in PostgreSQL for vector lookup.
-- Keep chunk size/overlap under control through env-driven values.
-
-## Security / safety
-
-- All secrets in `.env` only.
-- No host or network infra modifications inside this repo.
-- Vector retrieval is fully inside Supabase `pgvector` + PostgREST/RPC boundaries.
-
-## API endpoints in scope
-
-- Meta verification + inbound:
-  - `https://<your-n8n-domain>/webhook/instagram-webhook`
-- KB upload:
-  - `https://<your-n8n-domain>/webhook/knowledge-upload`
-
-## Why this architecture for agent reuse
-
-- Deterministic workflow names and clear environment bindings make reinstallation and diff-driven updates predictable.
-- Supabase-only vector operations remove third-party wrapper complexity and keep the source of memory truth centralized.
-
-## Runtime delivery gate - 2026-06-18
-
-Outbound Instagram delivery is split into two explicit branches:
-
-- `IG_ENABLE_LIVE_SEND=false`: the workflow executes all RAG and logging steps, then ends in a dry-run delivery node. This is the default for public demos, synthetic webhook tests, and future agent onboarding.
-- `IG_ENABLE_LIVE_SEND=true`: the workflow calls the Instagram Messaging API. This requires a real `IG_ACCESS_TOKEN` and `IG_INSTAGRAM_BUSINESS_ACCOUNT_ID` in `.env` before syncing to n8n.
-
-This keeps the public workflow runnable without leaking credentials or sending accidental real DMs. Supabase remains the only memory/vector backend: tenant settings, conversation history, knowledge chunks, embeddings, retrieval RPCs, and analytics events all live in Postgres/pgvector.
-
-## Escalation state architecture
-
-The bot uses two Supabase layers for escalation:
-
-- `conversation_events` stores immutable events and audit history.
-- `thread_states` stores the current routing state for one tenant/channel/thread.
-
-When a handoff or low-confidence escalation happens, n8n calls `mark_thread_escalated`. The next inbound message in the same Instagram thread goes through `Escalation Silence Gate`; if the state is still `escalated`, the message is logged and no Instagram reply is sent.
-
-A human operator resumes automation by calling `reset_thread_escalation` after reviewing the thread.
+- n8n queue mode can scale webhook and worker execution with Redis.
+- Supabase vector indexes should be tenant-filtered and monitored as document volume grows.
+- Keep channel send nodes isolated so failures in Instagram/Telegram/WhatsApp do not corrupt core memory.

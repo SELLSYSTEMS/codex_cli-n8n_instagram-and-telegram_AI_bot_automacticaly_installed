@@ -69,8 +69,16 @@ api_post_put() {
   local payload="${3-}"
   local response
   local http_code
+  local payload_file
 
-  response="$(curl -sS -w '\n%{http_code}' -X "$method" "${AUTH[@]}" -H "Content-Type: application/json" "$url" ${payload:+--data "$payload"})"
+  if [[ -n "$payload" ]]; then
+    payload_file="$(mktemp)"
+    printf '%s' "$payload" > "$payload_file"
+    response="$(curl -sS -w '\n%{http_code}' -X "$method" "${AUTH[@]}" -H "Content-Type: application/json" "$url" --data-binary "@${payload_file}")"
+    rm -f "$payload_file"
+  else
+    response="$(curl -sS -w '\n%{http_code}' -X "$method" "${AUTH[@]}" -H "Content-Type: application/json" "$url")"
+  fi
   http_code="$(printf '%s' "$response" | tail -n 1)"
   response="$(printf '%s' "$response" | sed '$d')"
 
@@ -140,3 +148,5 @@ check_n8n_auth
 upsert_workflow workflows/demo-rag-instagram-supabase.json
 upsert_workflow workflows/knowledge-upload-to-supabase.json
 upsert_workflow workflows/internal-rag-bot-test-harness.json
+upsert_workflow workflows/telegram-rag-channel-adapter.json
+upsert_workflow workflows/whatsapp-rag-channel-adapter.json
