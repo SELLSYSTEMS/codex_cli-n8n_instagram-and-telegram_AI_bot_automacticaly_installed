@@ -1,0 +1,25 @@
+{
+  "name": "portable-conversational-agent-template",
+  "version": "1.0.0",
+  "description": "Channel-neutral conversational AI brain with local PostgreSQL memory, pgvector RAG, model failover, and replaceable n8n adapters.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:apply": "node scripts/apply-local-postgres-schema.mjs",
+    "brain:start": "node scripts/brain-service.mjs",
+    "brain:smoke": "node scripts/brain-smoke.mjs",
+    "brain:scenarios": "node scripts/brain-scenarios.mjs",
+    "knowledge:ingest": "node scripts/ingest-knowledge.mjs",
+    "models:test": "node scripts/test-model-router.mjs",
+    "workflows:generate": "node scripts/generate-n8n-workflows.mjs",
+    "template:audit": "node scripts/audit-public-template-safety.mjs",
+    "check": "npm run workflows:generate && npm run models:test && npm run template:audit"
+  },
+  "dependencies": {
+    "@langchain/langgraph": "^1.0.2",
+    "pg": "^8.16.3"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "description": "Channel-neutral behavioral scenarios. Expected outcomes are semantic, not canned reply text.",
+  "scenarios": [
+    {
+      "id": "new_lead_discovery",
+      "turns": ["Hello, what can your company help me with?", "We need to reduce manual support workload but I do not know the right solution."],
+      "expect": "Discovers the business need, explains relevant value from knowledge, and proposes a concrete next step."
+    },
+    {
+      "id": "technical_depth",
+      "turns": ["Can this integrate with our CRM and preserve conversation context across channels?"],
+      "expect": "Answers only from verified capabilities, identifies missing technical facts, and asks a useful implementation question."
+    },
+    {
+      "id": "price_without_evidence",
+      "turns": ["Give me the exact price now."],
+      "expect": "Does not invent a price; uses available pricing knowledge or gathers scope needed for an accurate quote."
+    },
+    {
+      "id": "price_local_currency",
+      "turns": ["Could you quote this in my local currency and explain what is included?"],
+      "expect": "Handles currency naturally without a language branch and distinguishes estimates from verified pricing."
+    },
+    {
+      "id": "language_switch",
+      "turns": ["Здравствуйте, можете помочь с автоматизацией?", "Please continue in English and keep it short."],
+      "expect": "Maintains context while naturally following the language and style change."
+    },
+    {
+      "id": "skeptical_buyer",
+      "turns": ["I have tried automation vendors before. They overpromise and disappear."],
+      "expect": "Acknowledges the concern, avoids defensiveness, offers evidence or a low-risk validation step."
+    },
+    {
+      "id": "competitor_comparison",
+      "turns": ["Why should I choose you instead of another provider?"],
+      "expect": "Uses substantiated differentiators and asks about decision criteria without attacking competitors."
+    },
+    {
+      "id": "security_procurement",
+      "turns": ["Our security team needs data-flow and retention details before a pilot."],
+      "expect": "Uses verified policy details and escalates only if an authoritative answer is unavailable."
+    },
+    {
+      "id": "urgent_incident",
+      "turns": ["Our production integration is down and customers are affected right now."],
+      "expect": "Prioritizes triage, gathers minimum diagnostic facts, and escalates when human operational action is required."
+    },
+    {
+      "id": "off_topic_recovery",
+      "turns": ["Tell me a joke.", "Anyway, can you help us qualify inbound leads?"],
+      "expect": "Handles the diversion briefly and returns to the relevant business request without restarting the conversation."
+    },
+    {
+      "id": "payment_close",
+      "turns": ["The proposal works for us. How do we start and pay the deposit?"],
+      "expect": "Provides only verified next steps and payment instructions; otherwise requests the minimum human action needed."
+    },
+    {
+      "id": "escalation_silence_reset",
+      "turns": ["I need a binding contractual exception approved today.", "Are you still there?"],
+      "expect": "Sends at most one escalation acknowledgement, then remains silent until an operator resets the marker."
+    }
+  ]
+}

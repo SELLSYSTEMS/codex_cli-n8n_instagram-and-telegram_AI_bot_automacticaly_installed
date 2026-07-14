@@ -1,41 +1,36 @@
 # Roadmap
 
-## Phase 1: Instagram proof of concept
+## Foundation
 
-- Keep one production workflow: `Demo: RAG in n8n`.
-- Use Supabase as the only memory and vector store.
-- Use `documents` for curated company knowledge chunks.
-- Use `conversation_events` for immutable chat audit.
-- Use `thread_states` for routing state such as escalation silence.
-- Keep all credentials in runtime `.env` only.
-- Keep public repo docs and workflow exports secret-free.
+- Local PostgreSQL and pgvector schema.
+- Stable Brain API contract.
+- Structured actions.
+- Durable escalation and reset.
+- Thin multichannel adapters.
+- Channel-free test harness.
 
-## Phase 2: Public installer-quality repo
+## Quality
 
-- Make the repo usable by an agent such as OpenClaw plus Codex CLI.
-- Document required accounts, tokens, setup order, and smoke tests.
-- Provide schema, workflow exports, runbooks, and skill instructions.
-- Keep company-specific memory out of the public template.
-- Provide placeholders and clear environment variable names instead of secrets.
+- Versioned prompts and tool contracts.
+- Retrieval evaluations.
+- Long-conversation compaction.
+- Cross-channel identity linking with operator confirmation.
+- Sales and support scenario benchmarks.
+- Tracing and cost reporting.
 
-## Phase 3: Private bot memory and evaluation
+## Scale
 
-- Ingest only curated, customer-safe company knowledge into `documents`.
-- Keep operator-only policies out of customer-facing retrieval unless retrieval filters are implemented.
-- Add evaluation prompts for sales, support, pricing, handoff, and refusal cases.
-- Review conversation logs weekly and update the curated pack rather than raw notes.
+- Queue-backed processing.
+- Worker concurrency and backpressure.
+- Partitioning and retention.
+- Provider circuit breakers.
+- Human operator inbox integration.
+- Optional managed PostgreSQL or Supabase profile.
 
-## Phase 4: Telegram and multi-channel expansion
+## Template maturity
 
-- Add a channel adapter layer.
-- Reuse Supabase tenant/thread/document architecture.
-- Store channel-specific IDs in channel-specific fields or metadata.
-- Keep one canonical company memory layer across channels.
-- Add channel-specific style rules only where needed.
-
-## Phase 5: Template productization
-
-- Separate public template assets from private {{COMPANY_NAME}} runtime memory.
-- Provide a bootstrap checklist for new users to connect their own Meta/Supabase/n8n/OpenAI accounts.
-- Provide ingestion contracts for customer-owned company memory.
-- Provide operator reset, escalation, and monitoring playbooks.
+- Idempotent installer.
+- Upgrade and rollback contracts.
+- Synthetic demo tenant.
+- Versioned workflow artifacts.
+- Automated public-safety and compatibility checks.

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "reasoning_effort": "low",
+  "routes": [
+    {
+      "id": "codex_spark",
+      "provider": "codex_cli",
+      "enabled": true,
+      "priority": 10,
+      "model": "gpt-5.3-codex-spark",
+      "purpose": "primary"
+    },
+    {
+      "id": "codex_mini",
+      "provider": "codex_cli",
+      "enabled": true,
+      "priority": 20,
+      "model": "gpt-5.4-mini",
+      "purpose": "CLI quota fallback"
+    },
+    {
+      "id": "deepseek_flash",
+      "provider": "deepseek_api",
+      "enabled": false,
+      "priority": 30,
+      "model": "deepseek-chat",
+      "purpose": "optional API fallback"
+    },
+    {
+      "id": "openai_api",
+      "provider": "openai_api",
+      "enabled": false,
+      "priority": 40,
+      "model": "gpt-4.1",
+      "purpose": "optional API fallback"
+    },
+    {
+      "id": "deepseek_reasoner",
+      "provider": "deepseek_api",
+      "enabled": false,
+      "priority": 50,
+      "model": "deepseek-reasoner",
+      "purpose": "optional reasoning fallback"
+    }
+  ]
+}

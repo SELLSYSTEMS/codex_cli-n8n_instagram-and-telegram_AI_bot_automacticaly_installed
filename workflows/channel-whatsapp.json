@@ -1,0 +1,255 @@
+{
+  "name": "Channel Adapter: WhatsApp -> Shared Brain",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# WhatsApp Cloud transport only\n\nThis workflow handles webhook verification, inbound normalization, Brain API invocation, and Cloud API delivery. Status events are acknowledged but not sent to the model.\n\nRequired runtime values: `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION`, `BRAIN_API_URL`, `BRAIN_API_TOKEN`, `BRAIN_TENANT_KEY`.\n\nKeep it inactive in the public template.",
+        "width": 640,
+        "height": 330,
+        "color": 5
+      },
+      "id": "e7734185-1509-4735-a5c9-4a9c6d330471",
+      "name": "READ ME - WhatsApp Cloud Adapter",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -900,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-rag-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "5b90703a-a88e-406e-aa8f-d6ea22506735",
+      "name": "WhatsApp Webhook Verification",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -860,
+        20
+      ],
+      "webhookId": "49fd0a66-82c5-40bd-a550-b3d880856af5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $json.query ?? {};\nconst expected = $env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;\nconst valid = Boolean(expected) && query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === expected;\nreturn [{ json: { status: valid ? 200 : 403, body: valid ? String(query['hub.challenge'] ?? '') : 'Forbidden' } }];"
+      },
+      "id": "d6ebc14b-6a63-4cf9-a767-3a7690d51296",
+      "name": "Verify WhatsApp Subscription",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.body }}",
+        "options": {
+          "responseCode": "={{ $json.status }}"
+        }
+      },
+      "id": "ff18bb69-27c4-4a03-a266-5673e6c6b5d2",
+      "name": "Return Meta Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -360,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-rag-webhook",
+        "responseMode": "onReceived",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "4192139d-6b70-4737-ac1b-73042c1152eb",
+      "name": "WhatsApp Message Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -860,
+        260
+      ],
+      "webhookId": "21524024-a9ec-43b0-a9d6-78fa664545cf"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nconst values = (body.entry ?? []).flatMap((entry) => (entry.changes ?? []).map((change) => change.value ?? {}));\nconst value = values.find((item) => Array.isArray(item.messages) && item.messages.length);\nconst message = value?.messages?.[0];\nconst text = message?.text?.body ?? message?.button?.text ?? message?.interactive?.button_reply?.title ?? message?.interactive?.list_reply?.title;\nif (!message || !text) return [];\nconst contact = value.contacts?.find((item) => item.wa_id === message.from) ?? value.contacts?.[0];\nreturn [{ json: {\n  tenant_key: $env.BRAIN_TENANT_KEY || 'default',\n  channel: 'whatsapp',\n  external_user_id: String(message.from),\n  channel_conversation_id: String(message.from),\n  external_message_id: String(message.id),\n  text: String(text),\n  metadata: { profile_name: contact?.profile?.name ?? null, message_type: message.type ?? null },\n} }];"
+      },
+      "id": "c92ba270-49cb-4a54-a3c3-691804d45c23",
+      "name": "Normalize WhatsApp Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.BRAIN_API_URL || 'http://127.0.0.1:8789').replace(/\\/$/, '') + '/v1/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.BRAIN_API_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "3fb33c72-063d-4239-ad67-9ec03eb12dcd",
+      "name": "Call Shared Brain API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -330,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.should_send || typeof $json.reply_text !== 'string' || !$json.reply_text.trim()) return [];\nreturn [{ json: $json }];"
+      },
+      "id": "d877190e-975b-4e60-a51e-0fa006a1801d",
+      "name": "Operational Send Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/' + ($env.WHATSAPP_GRAPH_API_VERSION || 'v25.0') + '/' + $env.WHATSAPP_PHONE_NUMBER_ID + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.WHATSAPP_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", to: $node[\"Normalize WhatsApp Message\"].json.external_user_id, type: \"text\", text: { preview_url: false, body: $json.reply_text } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "7c33b096-d7cd-431a-ac7e-39cdd63f589d",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        250,
+        260
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WhatsApp Webhook Verification": {
+      "main": [
+        [
+          {
+            "node": "Verify WhatsApp Subscription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify WhatsApp Subscription": {
+      "main": [
+        [
+          {
+            "node": "Return Meta Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Message Receiver": {
+      "main": [
+        [
+          {
+            "node": "Normalize WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "Call Shared Brain API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Shared Brain API": {
+      "main": [
+        [
+          {
+            "node": "Operational Send Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Operational Send Guard": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "39e714e7-7e2d-43ff-a9ae-722f728b94d2",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

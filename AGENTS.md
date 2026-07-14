@@ -1,27 +1,30 @@
-## Scope
+# Repository agent contract
 
-This repository only covers:
-- GitHub docs and runbooks for the Instagram DM RAG bot playbook
-- n8n workflow artifacts
-- Supabase schema and operational notes
+## Purpose
 
-Do not use this repo as an execution target for host/network platform changes.
+This public repository is a generic, reusable installation template for a multichannel conversational AI system. It contains contracts, local PostgreSQL schema, orchestration scripts, n8n shell workflows, tests, and operational documentation.
 
-## Hard Constraints
+## Architecture rules
 
-- **Never modify** SSH configuration/files.
-- **Never modify** SSL/TLS certificate files or certificate issuance workflows.
-- **Never modify** WireGuard configuration.
-- **Never modify** firewall rules or security-groups.
-- Do not change unrelated services on the host, including Nginx, reverse-proxy, DNS, or system services.
+- Treat n8n as a replaceable channel and operations shell.
+- Keep conversation semantics, memory, RAG, tools, escalation, and model routing behind the Brain API.
+- Use local PostgreSQL with pgvector by default.
+- Use Supabase only when the human operator explicitly requests it in the initial installation prompt.
+- Keep channel adapters thin and free of company-specific sales logic.
+- Let the language model reason semantically. Do not encode language, intent, sales dialogue, objection handling, or escalation decisions as brittle keyword trees.
+- Operational checks for authentication, schema validation, idempotency, rate limits, delivery, and action dispatch are required.
 
-## Secrets and Credentials
+## Public-template safety
 
-- Do not commit secrets.
-- Keep all real secrets in `.env` and list them in `.gitignore`.
-- Use placeholders in workflow exports and docs; reference environment variables where possible.
+- Never commit credentials, tokens, private customer data, company knowledge, production IDs, private domains, or production exports.
+- Store real values only in a local ignored .env file or a proper secrets manager.
+- Keep tenant-specific prompts, documents, tests, and runtime overrides outside the public repository.
+- Before publishing, run npm run template:audit.
 
-## Operational Notes
+## Host safety
 
-- Main n8n domain: `https://<your-n8n-domain>`
-- Keep all user-facing workflow names and labels consistent for future AI agent onboarding.
+Do not modify SSH, TLS certificates, WireGuard, firewalls, security groups, Nginx, DNS, reverse proxies, or unrelated host services.
+
+## Completion standard
+
+An installation is complete only after schema application, Brain API health, isolated memory, escalation reset, model fallback, internal channel-free tests, and selected channel smoke tests pass.
