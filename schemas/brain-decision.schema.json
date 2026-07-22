@@ -1,0 +1,561 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Conversational brain decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reply",
+    "response_language",
+    "reply_language_consistent",
+    "intent",
+    "conversation_phase",
+    "customer_readiness",
+    "material_blocker",
+    "next_best_action",
+    "commercial_progress",
+    "decision_status",
+    "confirmed_commitments",
+    "pending_customer_commitment",
+    "solution_scope",
+    "should_reply",
+    "should_escalate",
+    "escalation_reason",
+    "confidence",
+    "conversation_summary",
+    "commercial_action",
+    "contact_profile",
+    "commercial_next_step",
+    "active_workstream",
+    "workstream_changed"
+  ],
+  "properties": {
+    "reply": {
+      "type": "string"
+    },
+    "response_language": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The natural language selected from the newest customer message, or the language explicitly requested by the customer."
+    },
+    "reply_language_consistent": {
+      "type": "boolean",
+      "const": true,
+      "description": "True only after every natural-language fragment of reply has been audited and uses response_language, excluding proper nouns, URLs and code."
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The customer's current underlying intent, inferred from the whole conversation rather than keywords."
+    },
+    "conversation_phase": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A concise semantic description of where the conversation currently stands; do not force it into a fixed funnel."
+    },
+    "customer_readiness": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A concise evidence-based assessment of the customer's present readiness to progress or commit."
+    },
+    "solution_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "customer_goal",
+        "delivery_surfaces",
+        "conversation_channels",
+        "handoff_destinations",
+        "required_capabilities",
+        "operational_constraints"
+      ],
+      "properties": {
+        "customer_goal": {
+          "type": "string",
+          "description": "Cumulative customer outcome in semantic terms; empty only when it is genuinely unknown."
+        },
+        "delivery_surfaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Where the proposed solution itself operates."
+        },
+        "conversation_channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Where end users converse with the assistant."
+        },
+        "handoff_destinations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Where human operators receive escalated conversations."
+        },
+        "required_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Cumulative capabilities confirmed or requested by the customer."
+        },
+        "operational_constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Cumulative constraints, dependencies, assumptions, and material unknowns."
+        }
+      }
+    },
+    "material_blocker": {
+      "type": "string",
+      "description": "The single genuinely material unresolved issue preventing the next commitment, or an empty string when none exists."
+    },
+    "next_best_action": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The best concrete customer-visible action to perform in this reply. It must create an externally observable outcome, not describe internal note-taking, preparation, planning, or future work. When the customer is ready to proceed and no material blocker remains, it must include one grounded recommendation or value synthesis and one explicit, easy-to-answer commitment request."
+    },
+    "commercial_progress": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The concrete customer decision, commitment, objection resolution, or support outcome this reply should create. Internal assistant activity, acknowledgment, paraphrase, or a promise to prepare something later is not progress."
+    },
+    "decision_status": {
+      "type": "string",
+      "enum": [
+        "exploring",
+        "evaluating",
+        "scope_agreed",
+        "transaction_ready",
+        "committed",
+        "not_applicable"
+      ],
+      "description": "Semantic state of the customer's decision. Explicit acceptance of the immediately preceding proposal counts as agreement; a compatible refinement does not revoke it."
+    },
+    "confirmed_commitments": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Cumulative customer-approved decisions and constraints from the conversation. Preserve compatible prior agreements and never reopen unchanged commitments."
+    },
+    "pending_customer_commitment": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "At most one genuinely unresolved customer action required to progress. Use null when none remains. An optional implementation detail, repeated final confirmation, or internal planning step is not a pending customer commitment."
+    },
+    "should_reply": {
+      "type": "boolean"
+    },
+    "should_escalate": {
+      "type": "boolean",
+      "description": "Set true only when the runtime must persist and dispatch a human handoff. A direct request to stop automation and speak with a human is sufficient. Never claim a handoff in reply while this is false."
+    },
+    "escalation_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Concise operational reason when should_escalate is true; null otherwise."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "conversation_summary": {
+      "type": "string"
+    },
+    "contact_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "company",
+        "role",
+        "email",
+        "phone",
+        "language",
+        "locale",
+        "country",
+        "currency",
+        "needs",
+        "goals",
+        "constraints",
+        "objections",
+        "preferences",
+        "budget",
+        "timeline",
+        "decision_authority",
+        "lifecycle_stage",
+        "facts"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "company": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "country": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "needs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "goals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "objections": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "preferences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "budget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision_authority": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lifecycle_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "commercial_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "selection_reason",
+        "requested_commitment",
+        "arguments"
+      ],
+      "properties": {
+        "action_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "LLM-selected commercial action. request_required_fact is valid only for a fact explicitly identified as mandatory by authoritative supplied context."
+        },
+        "selection_reason": {
+          "type": "string",
+          "description": "Semantic reason this is the nearest useful commercial step, grounded in explicit customer commitments and supplied context."
+        },
+        "requested_commitment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "One concrete customer commitment requested by the selected action; never a repeated or invented prerequisite."
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "option_id",
+            "grounded_total_usd",
+            "grounding_reference",
+          "missing_fact",
+          "customer_commitment",
+          "authorization_is_explicit",
+          "authorization_is_unambiguous",
+          "authorization_evidence",
+          "authorization_scope"
+          ],
+          "properties": {
+            "option_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "grounded_total_usd": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "grounding_reference": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "A short literal excerpt from supplied authoritative context that proves either the exact total or that the missing fact is mandatory."
+            },
+            "missing_fact": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Only for request_required_fact: the single genuinely mandatory fact still absent. Null for all other actions."
+            },
+            "customer_commitment": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "authorization_is_explicit": {
+              "type": "boolean",
+              "description": "Whether the newest inbound message explicitly authorizes this exact commercial action."
+            },
+            "authorization_is_unambiguous": {
+              "type": "boolean",
+              "description": "Whether no other service, scope, price, payment option, or next step could reasonably be meant."
+            },
+            "authorization_evidence": {
+              "type": "string",
+              "description": "Short evidence from the newest inbound message; empty when authorization is absent."
+            },
+            "authorization_scope": {
+              "type": "string",
+              "description": "The exact service, option, amount, and action authorized; empty when unresolved."
+            }
+          }
+        }
+      }
+    },
+    "commercial_next_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "LLM-selected commercial progression grounded in conversation, memory, RAG, private policy, and verified tool results.",
+      "required": [
+        "stage",
+        "customer_outcome",
+        "recommended_step",
+        "why_now",
+        "customer_commitment",
+        "seller_commitment",
+        "payment_request",
+        "grounding_refs"
+      ],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": [
+            "none",
+            "discover",
+            "recommend",
+            "commit",
+            "payment",
+            "handoff"
+          ]
+        },
+        "customer_outcome": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The business outcome the customer is trying to achieve, stated without inventing facts."
+        },
+        "recommended_step": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The single best reversible next step selected semantically by the model."
+        },
+        "why_now": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why this step is appropriate now, based on current evidence."
+        },
+        "customer_commitment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The concrete commitment requested from the customer, if any."
+        },
+        "seller_commitment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The concrete commitment offered by the company, if any."
+        },
+        "payment_request": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "percentage",
+                "amount",
+                "currency",
+                "credits",
+                "url",
+                "instructions"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "deposit",
+                    "full"
+                  ]
+                },
+                "percentage": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "amount": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "currency": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "credits": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "instructions": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Grounded operational payment instructions, never a canned response."
+                }
+              }
+            }
+          ]
+        },
+        "grounding_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "active_workstream": {
+      "type": "string",
+      "description": "Concise semantic description of the outcome or service currently being discussed."
+    },
+    "workstream_changed": {
+      "type": "boolean",
+      "description": "True only when the customer materially changed the active outcome or service in this turn."
+    }
+  }
+}

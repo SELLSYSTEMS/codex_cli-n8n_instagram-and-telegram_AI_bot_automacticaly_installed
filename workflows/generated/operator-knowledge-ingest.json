@@ -1,0 +1,101 @@
+{
+  "name": "Operator - Knowledge Ingest",
+  "active": false,
+  "nodes": [
+    {
+      "id": "c2285bc2-b8e0-4ceb-a36e-4ec6d872eff2",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -50
+      ],
+      "parameters": {
+        "content": "## Add or replace trusted knowledge\nPaste approved company knowledge into Editable operator input. It is chunked and embedded locally into PostgreSQL/pgvector.\nFor many files, use npm run knowledge:ingest instead.",
+        "height": 300,
+        "width": 620,
+        "color": 4
+      }
+    },
+    {
+      "id": "dc7f625c-6f63-4a8d-ab93-3cccc5709aa6",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "e99af56e-0a9f-4500-a377-b77ff9ee1735",
+      "name": "Editable operator input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: {\n  tenant_key: '__BRAIN_TENANT_KEY__',\n  source_path: 'operator/manual-note',\n  title: 'Replace with a descriptive title',\n  content: 'Replace with approved company knowledge'\n} }];"
+      }
+    },
+    {
+      "id": "085bb52f-4a3f-447a-a917-d99262bf027e",
+      "name": "Apply safely",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__BRAIN_API_URL__/v1/admin/knowledge",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __BRAIN_ADMIN_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Editable operator input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editable operator input": {
+      "main": [
+        [
+          {
+            "node": "Apply safely",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

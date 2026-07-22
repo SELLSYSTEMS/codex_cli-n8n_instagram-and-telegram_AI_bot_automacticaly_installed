@@ -8,7 +8,7 @@
       "enabled": true,
       "priority": 10,
       "model": "gpt-5.3-codex-spark",
-      "purpose": "primary"
+      "purpose": "primary credential-free Codex CLI route"
     },
     {
       "id": "codex_mini",
@@ -16,31 +16,31 @@
       "enabled": true,
       "priority": 20,
       "model": "gpt-5.4-mini",
-      "purpose": "CLI quota fallback"
+      "purpose": "Codex CLI quota fallback"
     },
     {
       "id": "deepseek_flash",
-      "provider": "deepseek_api",
+      "provider": "deepseek",
       "enabled": false,
       "priority": 30,
       "model": "deepseek-chat",
-      "purpose": "optional API fallback"
+      "purpose": "optional economical API fallback"
     },
     {
       "id": "openai_api",
-      "provider": "openai_api",
+      "provider": "openai",
       "enabled": false,
       "priority": 40,
       "model": "gpt-4.1",
-      "purpose": "optional API fallback"
+      "purpose": "optional OpenAI API fallback"
     },
     {
       "id": "deepseek_reasoner",
-      "provider": "deepseek_api",
+      "provider": "deepseek",
       "enabled": false,
       "priority": 50,
       "model": "deepseek-reasoner",
-      "purpose": "optional reasoning fallback"
+      "purpose": "optional quality reasoning API route"
     }
   ]
 }

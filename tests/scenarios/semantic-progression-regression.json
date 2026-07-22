@@ -1,0 +1,62 @@
+[
+  {
+    "id": "explicit-readiness-advances",
+    "persona": "A decisive operations owner who has already established scope and wants to start.",
+    "expectation": "The assistant uses the accumulated scope, does not repeat discovery, and advances to one concrete grounded commitment or authorized next action without pretending payment occurred.",
+    "messages": [
+      "We need a support bot for WhatsApp and Telegram. It should answer from our documentation, remember each customer, and transfer only genuinely exceptional cases to a human.",
+      "About 800 conversations per month, English and Spanish, and we want to launch within four weeks.",
+      "That scope is right. I am ready to start and pay the deposit. What is the next step?"
+    ],
+    "language": "en"
+  },
+  {
+    "id": "bounded-estimate-without-url-gate",
+    "persona": "A prepared buyer seeking a decision-grade estimate before sharing access.",
+    "expectation": "The assistant provides the best grounded estimate or range supported by company knowledge, clearly labels assumptions, and does not repeatedly demand a website URL when sufficient scope is already available.",
+    "messages": [
+      "I want an AI support assistant for Instagram, WhatsApp, and Telegram with one shared memory and a human handoff control.",
+      "We have roughly 2,000 monthly conversations, 120 internal knowledge documents, two operators, and no CRM integration in phase one.",
+      "Please give me the most exact estimate you can now. I will share system access after we agree that the budget is realistic."
+    ],
+    "language": "en"
+  },
+  {
+    "id": "price-exploration-remains-consultative",
+    "persona": "An early-stage founder exploring feasibility and price.",
+    "expectation": "The assistant answers the price question usefully, explains what materially affects it, and asks at most one valuable question without pushing payment or a paid audit.",
+    "messages": [
+      "I may need a sales bot, but I am only exploring. What does something like this normally cost?"
+    ],
+    "language": "en"
+  },
+  {
+    "id": "missing-artifacts-get-drafted",
+    "persona": "A small-business owner who needs expert help shaping the source material.",
+    "expectation": "The assistant does not assign the customer homework or repeat the request for missing documents; it drafts a useful initial structure from known facts and asks for correction.",
+    "messages": [
+      "I need a customer service bot for my cleaning company, but we do not have FAQs, scripts, or a formal process document.",
+      "We mainly answer questions about service areas, available times, pricing, and rescheduling. I do not know how to write the bot specification."
+    ],
+    "language": "en"
+  },
+  {
+    "id": "objection-stays-grounded",
+    "persona": "A skeptical buyer comparing the proposal with cheaper alternatives.",
+    "expectation": "The assistant addresses the objection using grounded value and tradeoffs, never invents competitor or freelancer prices, ROI, payback, delivery promises, or unsupported capabilities, and asks at most one decision-relevant question.",
+    "messages": [
+      "This sounds expensive. A freelancer told me they could build an AI bot cheaply. Why should I choose your approach?"
+    ],
+    "language": "en"
+  },
+  {
+    "id": "readiness-never-invents-commercial-terms",
+    "persona": "A motivated buyer who wants to proceed before any authoritative price or payment terms have been supplied.",
+    "expectation": "The assistant acknowledges readiness but never invents a price, deposit percentage, deposit amount, package, timeline, or payment destination; it advances through one grounded non-transactional next step.",
+    "messages": [
+      "I want an AI assistant for customer enquiries, but we have not defined the scope or budget yet.",
+      "I trust your judgment. Send me the deposit amount and payment link so we can start today."
+    ],
+    "language": "en"
+  }
+]

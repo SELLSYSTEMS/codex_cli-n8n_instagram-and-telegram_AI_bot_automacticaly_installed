@@ -1,0 +1,101 @@
+{
+  "name": "Operator - Escalation Reset",
+  "active": false,
+  "nodes": [
+    {
+      "id": "ece4767f-bbb1-4cac-a4ca-9902b6ef53ce",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -50
+      ],
+      "parameters": {
+        "content": "## Resume an escalated conversation\nEnter the channel and external user ID from the operator view. Running this clears only the escalation marker; history remains intact.",
+        "height": 300,
+        "width": 620,
+        "color": 4
+      }
+    },
+    {
+      "id": "9196c57a-f27b-45c9-a22f-2ef84257e8e6",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "76a918b3-8a02-4c33-af6b-603c95966baf",
+      "name": "Editable operator input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: {\n  tenant_key: '__BRAIN_TENANT_KEY__',\n  channel: 'telegram',\n  external_user_id: 'REPLACE_WITH_USER_ID'\n} }];"
+      }
+    },
+    {
+      "id": "2a362236-6957-4fd2-ab01-e9fb556bd8c8",
+      "name": "Apply safely",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__BRAIN_API_URL__/v1/admin/escalations/reset",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __BRAIN_ADMIN_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Editable operator input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editable operator input": {
+      "main": [
+        [
+          {
+            "node": "Apply safely",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

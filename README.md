@@ -46,3 +46,9 @@ n8n is the included replaceable orchestration shell, not the application core. A
 - docs/: architecture, contracts, operations, tests, and agent onboarding.
 
 No real credentials or company knowledge belong in this repository.
+
+## Local observability and Instagram delivery
+
+- Run `npm run langfuse:up` to start the local, loopback-only Langfuse stack.
+- Run `npm run instagram:webhook:configure` to idempotently configure and verify an Instagram Login webhook from private environment values.
+- See `docs/langfuse.md` and `docs/instagram-delivery-diagnostics.md`.

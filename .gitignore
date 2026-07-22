@@ -19,3 +19,4 @@ coverage/
 *.tmp
 *.debug
 .DS_Store
+deploy/langfuse/data/

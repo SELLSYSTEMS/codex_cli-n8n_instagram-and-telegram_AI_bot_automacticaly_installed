@@ -1,0 +1,101 @@
+{
+  "name": "Operator - Cross-channel Identity Link",
+  "active": false,
+  "nodes": [
+    {
+      "id": "babc28e9-619c-40ed-aa74-9b5ef5a84a23",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -50
+      ],
+      "parameters": {
+        "content": "## Link two channel identities\nUse this only after a human has confirmed both identities belong to the same person. The shared contact then keeps one memory across channels.",
+        "height": 300,
+        "width": 620,
+        "color": 4
+      }
+    },
+    {
+      "id": "cffbfade-f57c-4fd9-aeb2-c9fad2a94b9e",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "29860823-ec15-48d9-a627-a5ffcc643a8c",
+      "name": "Editable operator input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: {\n  tenant_key: '__BRAIN_TENANT_KEY__',\n  primary: { channel: 'telegram', external_user_id: 'REPLACE_PRIMARY_ID' },\n  secondary: { channel: 'whatsapp', external_user_id: 'REPLACE_SECONDARY_ID' }\n} }];"
+      }
+    },
+    {
+      "id": "3880e2cb-ea21-41d5-a03d-7941829bc94f",
+      "name": "Apply safely",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__BRAIN_API_URL__/v1/admin/identities/link",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __BRAIN_ADMIN_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Editable operator input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editable operator input": {
+      "main": [
+        [
+          {
+            "node": "Apply safely",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

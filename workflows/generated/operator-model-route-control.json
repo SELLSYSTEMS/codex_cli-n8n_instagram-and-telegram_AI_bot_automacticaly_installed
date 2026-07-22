@@ -1,0 +1,101 @@
+{
+  "name": "Operator - Model Route Control",
+  "active": false,
+  "nodes": [
+    {
+      "id": "65f98dd0-c41d-450b-a77e-9fa54b74ef6b",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -50
+      ],
+      "parameters": {
+        "content": "## Model route control\n\nEdit the ordered route list in **Desired Model Routes**, then execute this workflow. Lower priority numbers run first.\n\nDefault order: DeepSeek V4 Pro, DeepSeek V4 Flash, Codex Spark, Codex Mini. OpenAI API remains disabled until an operator enables it.\n\nThe Brain API owns fallback and cooldown behavior; channel workflows must not implement model-selection branches.",
+        "height": 300,
+        "width": 620,
+        "color": 4
+      }
+    },
+    {
+      "id": "464911c3-62e7-4acb-ab8c-2b6c465e12b2",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "3805f2c2-6433-42ae-a457-5548fce42913",
+      "name": "Editable operator input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const routes = [\n  { id: 'deepseek_reasoner', provider: 'deepseek', enabled: true, priority: 10, model: 'deepseek-v4-pro', purpose: 'primary quality reasoning' },\n  { id: 'deepseek_flash', provider: 'deepseek', enabled: true, priority: 20, model: 'deepseek-v4-flash', purpose: 'economical API fallback' },\n  { id: 'codex_spark', provider: 'codex_cli', enabled: true, priority: 30, model: 'gpt-5.3-codex-spark', purpose: 'Codex CLI fallback' },\n  { id: 'codex_mini', provider: 'codex_cli', enabled: true, priority: 40, model: 'gpt-5.4-mini', purpose: 'Codex CLI quota fallback' },\n  { id: 'openai_api', provider: 'openai', enabled: false, priority: 50, model: 'gpt-4.1', purpose: 'optional API fallback' }\n];\n\nreturn [{ json: { version: 1, reasoning_effort: 'low', routes } }];"
+      }
+    },
+    {
+      "id": "58548694-bc32-4c04-a5f7-380515b08c92",
+      "name": "Apply safely",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        300
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "__BRAIN_API_URL__/v1/admin/model-routes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __BRAIN_ADMIN_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Editable operator input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editable operator input": {
+      "main": [
+        [
+          {
+            "node": "Apply safely",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

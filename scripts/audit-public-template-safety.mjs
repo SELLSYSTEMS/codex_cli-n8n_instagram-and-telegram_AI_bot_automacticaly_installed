@@ -60,7 +60,22 @@ if (enabled[0]?.model !== 'gpt-5.3-codex-spark') {
 }
 
 const workflowFiles = files.filter((file) => file.startsWith('workflows/') && file.endsWith('.json'));
-if (workflowFiles.length !== 7) errors.push(`workflows: expected exactly 7 generic artifacts, found ${workflowFiles.length}`);
+const expectedWorkflowFiles = new Set([
+  'workflows/generated/channel-instagram-shared-ai-brain.json',
+  'workflows/generated/channel-telegram-shared-ai-brain.json',
+  'workflows/generated/channel-whatsapp-shared-ai-brain.json',
+  'workflows/generated/internal-brain-test-harness.json',
+  'workflows/generated/operator-cross-channel-identity-link.json',
+  'workflows/generated/operator-escalation-reset.json',
+  'workflows/generated/operator-knowledge-ingest.json',
+  'workflows/generated/operator-model-route-control.json',
+]);
+for (const relative of expectedWorkflowFiles) {
+  if (!workflowFiles.includes(relative)) errors.push(`${relative}: canonical workflow is missing`);
+}
+for (const relative of workflowFiles) {
+  if (!expectedWorkflowFiles.has(relative)) errors.push(`${relative}: unexpected workflow artifact`);
+}
 for (const relative of workflowFiles) {
   const artifact = JSON.parse(await readFile(join(root, relative), 'utf8'));
   if (artifact.active !== false) errors.push(`${relative}: public workflow must be inactive`);

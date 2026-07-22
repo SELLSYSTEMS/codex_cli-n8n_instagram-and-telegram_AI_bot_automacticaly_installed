@@ -1,0 +1,101 @@
+{
+  "name": "Internal - Brain Test Harness",
+  "active": false,
+  "nodes": [
+    {
+      "id": "03457332-2d29-46bb-a824-2c34d93b1da9",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -50
+      ],
+      "parameters": {
+        "content": "## Channel-free brain test\nRun this workflow to test the exact production brain without Instagram, WhatsApp, or Telegram.\nEdit the message and stable user ID to test multi-turn memory. This workflow never sends an external message.",
+        "height": 290,
+        "width": 620,
+        "color": 3
+      }
+    },
+    {
+      "id": "b6303546-1adc-40a5-a31e-aae3d5473c19",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "fbc1e916-bf40-4ceb-aac7-277d67589442",
+      "name": "Editable test message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: {\n  tenant_key: '__BRAIN_TENANT_KEY__',\n  channel: 'internal_test',\n  external_user_id: 'n8n-operator-test',\n  external_thread_id: 'n8n-operator-test',\n  external_message_id: 'manual-' + Date.now(),\n  text: 'Hello. Briefly explain how you can help my business.',\n  display_name: 'Operator test',\n  metadata: { source: \"n8n-manual-test\" }\n} }];"
+      }
+    },
+    {
+      "id": "0effb3ad-0e3c-42cb-aeda-468f519476f1",
+      "name": "Ask shared AI brain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__BRAIN_API_URL__/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __BRAIN_API_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Editable test message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editable test message": {
+      "main": [
+        [
+          {
+            "node": "Ask shared AI brain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

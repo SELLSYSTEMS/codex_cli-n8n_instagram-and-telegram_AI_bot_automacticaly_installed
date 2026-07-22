@@ -1,0 +1,277 @@
+{
+  "name": "Channel - WhatsApp - Shared AI Brain",
+  "active": false,
+  "nodes": [
+    {
+      "id": "dcd9a41d-ed6d-43ae-a9ce-17244bb08c8a",
+      "name": "Architecture",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -700,
+        -50
+      ],
+      "parameters": {
+        "content": "## WhatsApp transport adapter\nOnly transport-specific parsing lives here. The shared brain decides language, intent, sales behavior, tools, RAG, and escalation.\nStatus callbacks are acknowledged and ignored; user messages are idempotent in PostgreSQL.",
+        "height": 280,
+        "width": 520,
+        "color": 5
+      }
+    },
+    {
+      "id": "dd39aa25-c842-4068-a074-1143054661c3",
+      "name": "WhatsApp verification",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        420
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-rag-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "4c86c8b6-9834-426f-a287-06ca9d54fce6"
+    },
+    {
+      "id": "6bd294f5-c7f0-4dcf-a637-1ef5a6881944",
+      "name": "Validate verification token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -330,
+        420
+      ],
+      "parameters": {
+        "jsCode": "const query = $json.query ?? {};\nconst valid = query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === '__WHATSAPP_WEBHOOK_VERIFY_TOKEN__';\nif (!valid) throw new Error('Invalid WhatsApp webhook verification request');\nreturn [{ json: { challenge: String(query['hub.challenge'] ?? '') } }];"
+      }
+    },
+    {
+      "id": "118f8c16-8b0b-493a-aca0-778afdd1bd86",
+      "name": "Return challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -60,
+        420
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "34bb985f-ea99-47fd-a39b-7c86fd070b32",
+      "name": "WhatsApp messages",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        760
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-rag-webhook",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "f6536008-84d7-474e-a34a-bd4d81db77ea"
+    },
+    {
+      "id": "40046922-64b0-4606-a83e-72bc3e8e1edd",
+      "name": "Normalize WhatsApp messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -330,
+        760
+      ],
+      "parameters": {
+        "jsCode": "const envelope = $json.body ?? $json;\nif (envelope.object !== 'whatsapp_business_account') return [];\nconst output = [];\nfor (const entry of envelope.entry ?? []) {\n  for (const change of entry.changes ?? []) {\n    const value = change.value ?? {};\n    const names = new Map((value.contacts ?? []).map((item) => [String(item.wa_id), item.profile?.name ?? null]));\n    for (const message of value.messages ?? []) {\n      const text = String(message.text?.body ?? message.button?.text ?? message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? message.image?.caption ?? message.document?.caption ?? \"\").trim();\n      if (!text) continue;\n      const sender = String(message.from ?? \"\");\n      if (!sender) continue;\n      output.push({ json: {\n        tenant_key: '__BRAIN_TENANT_KEY__',\n        channel: 'whatsapp',\n        external_user_id: sender,\n        external_thread_id: sender,\n        external_message_id: String(message.id),\n        text,\n        display_name: names.get(sender) ?? null,\n        recipient_id: sender,\n        metadata: { phone_number_id: String(value.metadata?.phone_number_id ?? \"\"), message_type: message.type ?? \"text\", timestamp: message.timestamp ?? null }\n      } });\n    }\n  }\n}\nreturn output;"
+      }
+    },
+    {
+      "id": "0149caf7-df9c-4b35-a6bc-d71e4e6cf694",
+      "name": "Ask shared AI brain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        680
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__BRAIN_API_URL__/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __BRAIN_API_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "d8f2a2b3-098d-433e-ae3c-68523e4f6acb",
+      "name": "Restore delivery context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        260,
+        760
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      }
+    },
+    {
+      "id": "240378f4-097e-4257-aa20-0aa8b7ec63a2",
+      "name": "Deliver only when brain approves",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        760
+      ],
+      "parameters": {
+        "jsCode": "const reply = String($json.reply ?? '').trim();\nif ($json.should_reply !== true || !reply) return [];\nreturn [{ json: { ...$json, reply } }];"
+      }
+    },
+    {
+      "id": "2a2b57aa-8271-4c9d-a108-fd1533bb1449",
+      "name": "Send WhatsApp reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        770,
+        760
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/__WHATSAPP_GRAPH_API_VERSION__/__WHATSAPP_PHONE_NUMBER_ID__/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __WHATSAPP_ACCESS_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ messaging_product: \"whatsapp\", recipient_type: \"individual\", to: $json.recipient_id, type: \"text\", text: { preview_url: false, body: $json.reply } }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp verification": {
+      "main": [
+        [
+          {
+            "node": "Validate verification token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate verification token": {
+      "main": [
+        [
+          {
+            "node": "Return challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp messages": {
+      "main": [
+        [
+          {
+            "node": "Normalize WhatsApp messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize WhatsApp messages": {
+      "main": [
+        [
+          {
+            "node": "Ask shared AI brain",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Restore delivery context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask shared AI brain": {
+      "main": [
+        [
+          {
+            "node": "Restore delivery context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Restore delivery context": {
+      "main": [
+        [
+          {
+            "node": "Deliver only when brain approves",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deliver only when brain approves": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

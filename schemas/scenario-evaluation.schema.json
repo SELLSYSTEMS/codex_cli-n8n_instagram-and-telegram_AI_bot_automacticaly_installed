@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "average_score",
+    "critical_failures",
+    "scenario_scores"
+  ],
+  "properties": {
+    "average_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "critical_failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "issue"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "scenario_scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "score",
+          "note"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

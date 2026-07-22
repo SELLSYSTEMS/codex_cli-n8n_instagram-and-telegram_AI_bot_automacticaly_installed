@@ -1,81 +1,63 @@
-import { createHash } from "node:crypto";
-import { replaceKnowledgeDocument } from "./db.mjs";
+import crypto from 'node:crypto';
 
-function splitText(text, target = 1200, overlap = 180) {
-  const paragraphs = String(text || "").split(/\n\s*\n/).map((value) => value.trim()).filter(Boolean);
+export function sha256(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+
+export function chunkText(input, options = {}) {
+  const maxChars = Number(options.maxChars || process.env.KB_CHUNK_SIZE || 1200);
+  const overlap = Math.min(Number(options.overlap || process.env.KB_CHUNK_OVERLAP || 180), Math.floor(maxChars / 3));
+  const text = String(input || '').replace(/\r\n/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
+  if (!text) return [];
+
+  const paragraphs = text.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
   const chunks = [];
-  let current = "";
+  let current = '';
+
+  const flush = () => {
+    const value = current.trim();
+    if (value) chunks.push(value);
+    current = '';
+  };
 
   for (const paragraph of paragraphs) {
-    if (current && current.length + paragraph.length + 2 > target) {
-      chunks.push(current);
-      current = `${current.slice(-overlap)}\n\n${paragraph}`;
-    } else {
-      current = current ? `${current}\n\n${paragraph}` : paragraph;
+    if (paragraph.length > maxChars) {
+      flush();
+      let start = 0;
+      while (start < paragraph.length) {
+        let end = Math.min(start + maxChars, paragraph.length);
+        if (end < paragraph.length) {
+          const boundary = Math.max(
+            paragraph.lastIndexOf('. ', end),
+            paragraph.lastIndexOf('? ', end),
+            paragraph.lastIndexOf('! ', end),
+            paragraph.lastIndexOf(' ', end)
+          );
+          if (boundary > start + Math.floor(maxChars * 0.55)) end = boundary + 1;
+        }
+        chunks.push(paragraph.slice(start, end).trim());
+        if (end >= paragraph.length) break;
+        start = Math.max(end - overlap, start + 1);
+      }
+      continue;
+    }
+
+    const candidate = current ? current + '\n\n' + paragraph : paragraph;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+      continue;
+    }
+
+    const previous = current;
+    flush();
+    const tail = previous.slice(Math.max(0, previous.length - overlap)).trim();
+    current = (tail ? tail + '\n\n' : '') + paragraph;
+    if (current.length > maxChars) {
+      chunks.push(current.slice(0, maxChars).trim());
+      current = current.slice(Math.max(0, maxChars - overlap)).trim();
     }
   }
-  if (current) chunks.push(current);
-  return chunks;
-}
 
-async function embeddingFor(text) {
-  if (!process.env.EMBEDDING_API_URL) return null;
-  const response = await fetch(process.env.EMBEDDING_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(process.env.EMBEDDING_API_KEY
-        ? { Authorization: `Bearer ${process.env.EMBEDDING_API_KEY}` }
-        : {})
-    },
-    body: JSON.stringify({
-      model: process.env.EMBEDDING_MODEL || "text-embedding-3-small",
-      input: text
-    }),
-    signal: AbortSignal.timeout(Number(process.env.EMBEDDING_TIMEOUT_MS || 30000))
-  });
-  const body = await response.json();
-  if (!response.ok) throw new Error(`Embedding HTTP ${response.status}`);
-  const embedding = body.data?.[0]?.embedding;
-  if (!Array.isArray(embedding) || embedding.length !== 1536) {
-    throw new Error("Embedding endpoint must return a 1536-dimensional vector");
-  }
-  return embedding;
-}
-
-export async function ingestKnowledge(input) {
-  if (!String(input.text || "").trim()) throw new Error("Knowledge text is required");
-  const title = String(input.title || "Untitled document");
-  const sourceKey = String(
-    input.source_key ||
-    createHash("sha256").update(`${title}\n${input.source_uri || ""}`).digest("hex")
-  );
-  const texts = Array.isArray(input.chunks) && input.chunks.length
-    ? input.chunks.map(String)
-    : splitText(
-        input.text,
-        Number(input.chunk_size || process.env.KB_CHUNK_SIZE || 1200),
-        Number(input.chunk_overlap || process.env.KB_CHUNK_OVERLAP || 180)
-      );
-
-  const chunks = [];
-  for (const content of texts) {
-    let embedding = null;
-    try {
-      embedding = await embeddingFor(content);
-    } catch (error) {
-      if (process.env.EMBEDDING_REQUIRED === "true") throw error;
-    }
-    chunks.push({ content, embedding, metadata: input.chunk_metadata || {} });
-  }
-
-  return replaceKnowledgeDocument(
-    {
-      ...input,
-      source_key: sourceKey,
-      title,
-      checksum: createHash("sha256").update(String(input.text)).digest("hex")
-    },
-    chunks
-  );
+  flush();
+  return chunks.filter(Boolean);
 }

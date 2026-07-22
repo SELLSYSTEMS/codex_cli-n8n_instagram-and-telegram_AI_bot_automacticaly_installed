@@ -1,0 +1,196 @@
+{
+  "name": "Channel - Telegram - Shared AI Brain",
+  "active": false,
+  "nodes": [
+    {
+      "id": "3e53aaf0-c092-450d-a4b2-a7922ed2de4e",
+      "name": "Architecture",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -700,
+        -50
+      ],
+      "parameters": {
+        "content": "## Telegram transport adapter\nTelegram webhook authentication and normalization only. No language, intent, or sales branches.\nThe same PostgreSQL memory and shared AI brain are used by all channels.",
+        "height": 260,
+        "width": 520,
+        "color": 5
+      }
+    },
+    {
+      "id": "5aab8ddc-963b-48ef-af70-ec4973d569b1",
+      "name": "Telegram messages",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        540
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram-rag-webhook",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "6abba14a-bf92-42f8-a155-7ca45fa9a3fc"
+    },
+    {
+      "id": "10750c98-c4a8-4dca-a0ec-5e88df29fb5b",
+      "name": "Authenticate and normalize Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -330,
+        540
+      ],
+      "parameters": {
+        "jsCode": "const actualSecret = String($json.headers?.['x-telegram-bot-api-secret-token'] ?? '');\nif (actualSecret !== '__TELEGRAM_WEBHOOK_SECRET__') throw new Error('Invalid Telegram webhook secret');\nconst update = $json.body ?? $json;\nconst message = update.message ?? update.edited_message;\nif (!message) return [];\nconst text = String(message.text ?? message.caption ?? \"\").trim();\nif (!text) return [];\nconst sender = String(message.from?.id ?? message.chat?.id ?? \"\");\nconst chat = String(message.chat?.id ?? sender);\nif (!sender || !chat) return [];\nconst displayName = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(\" \") || message.from?.username || null;\nreturn [{ json: {\n  tenant_key: '__BRAIN_TENANT_KEY__',\n  channel: 'telegram',\n  external_user_id: sender,\n  external_thread_id: chat,\n  external_message_id: String(update.update_id ?? (chat + \":\" + message.message_id)),\n  text,\n  display_name: displayName,\n  recipient_id: chat,\n  metadata: { username: message.from?.username ?? null, message_id: message.message_id ?? null }\n} }];"
+      }
+    },
+    {
+      "id": "c2f00173-2213-49d9-a858-5eb1a5448c74",
+      "name": "Ask shared AI brain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__BRAIN_API_URL__/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __BRAIN_API_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "c4b82128-1ffa-4079-a3aa-10df4901e42a",
+      "name": "Restore delivery context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        260,
+        540
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      }
+    },
+    {
+      "id": "503b7572-559f-4ab4-afa1-7c515344778d",
+      "name": "Deliver only when brain approves",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        540
+      ],
+      "parameters": {
+        "jsCode": "const reply = String($json.reply ?? '').trim();\nif ($json.should_reply !== true || !reply) return [];\nreturn [{ json: { ...$json, reply } }];"
+      }
+    },
+    {
+      "id": "806e320b-cd0a-428f-a566-d4de8ccce181",
+      "name": "Send Telegram reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        770,
+        540
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot__TELEGRAM_BOT_TOKEN__/sendMessage",
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ chat_id: $json.recipient_id, text: $json.reply }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Telegram messages": {
+      "main": [
+        [
+          {
+            "node": "Authenticate and normalize Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticate and normalize Telegram": {
+      "main": [
+        [
+          {
+            "node": "Ask shared AI brain",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Restore delivery context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask shared AI brain": {
+      "main": [
+        [
+          {
+            "node": "Restore delivery context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Restore delivery context": {
+      "main": [
+        [
+          {
+            "node": "Deliver only when brain approves",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deliver only when brain approves": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

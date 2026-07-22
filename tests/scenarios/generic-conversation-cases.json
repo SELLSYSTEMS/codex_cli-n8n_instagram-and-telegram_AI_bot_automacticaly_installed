@@ -1,66 +1,206 @@
-{
-  "version": 1,
-  "description": "Channel-neutral behavioral scenarios. Expected outcomes are semantic, not canned reply text.",
-  "scenarios": [
-    {
-      "id": "new_lead_discovery",
-      "turns": ["Hello, what can your company help me with?", "We need to reduce manual support workload but I do not know the right solution."],
-      "expect": "Discovers the business need, explains relevant value from knowledge, and proposes a concrete next step."
-    },
-    {
-      "id": "technical_depth",
-      "turns": ["Can this integrate with our CRM and preserve conversation context across channels?"],
-      "expect": "Answers only from verified capabilities, identifies missing technical facts, and asks a useful implementation question."
-    },
-    {
-      "id": "price_without_evidence",
-      "turns": ["Give me the exact price now."],
-      "expect": "Does not invent a price; uses available pricing knowledge or gathers scope needed for an accurate quote."
-    },
-    {
-      "id": "price_local_currency",
-      "turns": ["Could you quote this in my local currency and explain what is included?"],
-      "expect": "Handles currency naturally without a language branch and distinguishes estimates from verified pricing."
-    },
-    {
-      "id": "language_switch",
-      "turns": ["Здравствуйте, можете помочь с автоматизацией?", "Please continue in English and keep it short."],
-      "expect": "Maintains context while naturally following the language and style change."
-    },
-    {
-      "id": "skeptical_buyer",
-      "turns": ["I have tried automation vendors before. They overpromise and disappear."],
-      "expect": "Acknowledges the concern, avoids defensiveness, offers evidence or a low-risk validation step."
-    },
-    {
-      "id": "competitor_comparison",
-      "turns": ["Why should I choose you instead of another provider?"],
-      "expect": "Uses substantiated differentiators and asks about decision criteria without attacking competitors."
-    },
-    {
-      "id": "security_procurement",
-      "turns": ["Our security team needs data-flow and retention details before a pilot."],
-      "expect": "Uses verified policy details and escalates only if an authoritative answer is unavailable."
-    },
-    {
-      "id": "urgent_incident",
-      "turns": ["Our production integration is down and customers are affected right now."],
-      "expect": "Prioritizes triage, gathers minimum diagnostic facts, and escalates when human operational action is required."
-    },
-    {
-      "id": "off_topic_recovery",
-      "turns": ["Tell me a joke.", "Anyway, can you help us qualify inbound leads?"],
-      "expect": "Handles the diversion briefly and returns to the relevant business request without restarting the conversation."
-    },
-    {
-      "id": "payment_close",
-      "turns": ["The proposal works for us. How do we start and pay the deposit?"],
-      "expect": "Provides only verified next steps and payment instructions; otherwise requests the minimum human action needed."
-    },
-    {
-      "id": "escalation_silence_reset",
-      "turns": ["I need a binding contractual exception approved today.", "Are you still there?"],
-      "expect": "Sends at most one escalation acknowledgement, then remains silent until an operator resets the marker."
-    }
-  ]
-}
+[
+  {
+    "id": "vague-founder",
+    "persona": "Busy founder with an unclear need",
+    "messages": [
+      "We probably need some automation but I am not sure where to start.",
+      "The biggest issue is that leads wait too long for a reply."
+    ],
+    "expectation": "Clarifies the business bottleneck naturally, connects it to a relevant solution, and advances the conversation without forcing a pitch.",
+    "language": "en"
+  },
+  {
+    "id": "technical-buyer",
+    "persona": "Technical buyer",
+    "messages": [
+      "Can your solution integrate webhooks, our CRM, and a private PostgreSQL knowledge base?",
+      "How would you keep customer conversations isolated?"
+    ],
+    "expectation": "Answers technically and accurately, avoids invented implementation claims, and asks a useful architecture question.",
+    "language": "en"
+  },
+  {
+    "id": "price-objection",
+    "persona": "Price-sensitive owner",
+    "messages": [
+      "This sounds expensive. Why should I not just hire a cheap freelancer?",
+      "I care mostly about payback time."
+    ],
+    "expectation": "Handles the objection respectfully through value, risk, and focused discovery rather than pressure or canned phrases. A generic price objection must not introduce an unrelated paid audit, fixed-price package, checkout, or deposit before a relevant scope is established.",
+    "language": "en"
+  },
+  {
+    "id": "skeptical-lead",
+    "persona": "Skeptical lead burned by vendors",
+    "messages": [
+      "Every AI agency promises everything and then disappears.",
+      "What would you do differently before asking me to pay?"
+    ],
+    "expectation": "Acknowledges the concern, offers a credible low-risk next step, and does not make unverifiable guarantees.",
+    "language": "en"
+  },
+  {
+    "id": "urgent-support",
+    "persona": "Existing client with an urgent technical problem",
+    "messages": [
+      "Our inbound bot suddenly stopped answering WhatsApp messages. What should I check first?",
+      "The webhook returns 200 but no reply is sent."
+    ],
+    "expectation": "Troubleshoots methodically, preserves context, and does not turn support into an irrelevant sales script.",
+    "language": "en"
+  },
+  {
+    "id": "after-hours-lead",
+    "persona": "Operations lead with missed after-hours inquiries",
+    "messages": [
+      "Hello. We keep missing customer messages outside business hours.",
+      "We need a bot that can qualify leads and hand complex cases to a person."
+    ],
+    "expectation": "Discover the operating context, clarify the desired outcome, and advance one useful next step without forcing a transaction.",
+    "language": "en"
+  },
+  {
+    "id": "multichannel-operator",
+    "persona": "Operator evaluating a unified multichannel assistant",
+    "messages": [
+      "Hello. We need one assistant for Instagram, Telegram, and WhatsApp.",
+      "It should remember each customer and help our sales team qualify opportunities."
+    ],
+    "expectation": "Clarify channel, memory, qualification, and handoff needs before recommending a grounded next step.",
+    "language": "en"
+  },
+  {
+    "id": "terse-mobile",
+    "persona": "Terse mobile user",
+    "messages": [
+      "price?",
+      "for ig wa tg",
+      "small team 3 ppl"
+    ],
+    "expectation": "Infers carefully, asks only high-value questions, and remains concise rather than dumping a brochure. It must not anchor an unrelated fixed price or package before the terse requirements are sufficiently scoped.",
+    "language": "en"
+  },
+  {
+    "id": "security-review",
+    "persona": "Security-conscious buyer",
+    "messages": [
+      "Where do you store conversations and who can access them?",
+      "We cannot send our customer data to random vector databases."
+    ],
+    "expectation": "Answers from trusted knowledge, distinguishes facts from unknowns, and avoids false compliance claims.",
+    "language": "en"
+  },
+  {
+    "id": "off-topic-recovery",
+    "persona": "Lead who briefly goes off-topic",
+    "messages": [
+      "Can you also tell me tomorrow's weather?",
+      "Anyway, our real issue is qualifying Instagram leads."
+    ],
+    "expectation": "Handles the tangent briefly and smoothly returns to the relevant business need without premature escalation.",
+    "language": "en"
+  },
+  {
+    "id": "comparison",
+    "persona": "Buyer comparing alternatives",
+    "messages": [
+      "Why use an AI agent instead of simple FAQ rules?",
+      "But I do not want it inventing answers."
+    ],
+    "expectation": "Explains tradeoffs, addresses grounding and guardrails, and avoids attacking alternatives.",
+    "language": "en"
+  },
+  {
+    "id": "high-intent",
+    "persona": "High-intent buyer",
+    "messages": [
+      "I want this for three channels and need to launch soon. What do you need from me?",
+      "If the scope is clear I can approve a deposit this week."
+    ],
+    "expectation": "Recognizes buying intent, gathers only missing essentials, and proposes a concrete commitment or next step without unnecessary delay.",
+    "language": "en"
+  },
+  {
+    "id": "decision-ready-support-bot-close",
+    "messages": [
+      "We need a support bot for our website and messaging channels.",
+      "The scope makes sense. I am ready to move forward. What is the next step?",
+      "The scope makes sense. I am ready to move forward. What is the next step?",
+      "The scope makes sense. I am ready to move forward. What is the next step?",
+      "The scope makes sense. I am ready to move forward. What is the next step?"
+    ],
+    "persona": "A high-intent buyer who progressively confirms the scope of a website support bot.",
+    "expectation": "Recognize genuine decision readiness and advance the next authorized commercial step without inventing price, scope, or payment terms.",
+    "language": "en"
+  },
+  {
+    "id": "whatsapp-confirmation-must-progress-sale",
+    "messages": [
+      "We need an AI assistant for WhatsApp that answers product questions and qualifies leads.",
+      "That approach works for us. Let us move forward.",
+      "That approach works for us. Let us move forward.",
+      "That approach works for us. Let us move forward.",
+      "That approach works for us. Let us move forward.",
+      "That approach works for us. Let us move forward.",
+      "That approach works for us. Let us move forward."
+    ],
+    "persona": "A concise Russian-speaking buyer who wants a website support chatbot with Telegram human handoff and sales-closing capability.",
+    "success_criteria": [
+      "The final answer is not a bare acknowledgement or paraphrase.",
+      "The assistant retains the agreed website support, sales, and Telegram handoff scope.",
+      "The assistant advances to one concrete proposal, scoping, or implementation next step.",
+      "The assistant does not interpret the final confirmation as authorization to invent a price or execute a purchase.",
+      "The wording is natural and generated from context rather than a canned sales template.",
+      "The assistant does not repeatedly ask the customer to author FAQs, scripts, or templates before it can propose a useful solution.",
+      "A materially ambiguous capability is clarified once rather than silently assigned the wrong meaning.",
+      "Once the working scope is clear, the assistant proposes a concrete scoped next step; it does not treat a generic confirmation as transaction authorization."
+    ],
+    "language": "en"
+  },
+  {
+    "id": "semantic-ambiguity-must-clarify-and-progress",
+    "messages": [
+      "We need automation for customer conversations and follow-up.",
+      "Yes."
+    ],
+    "persona": "A concise buyer whose final phrase can plausibly mean closing sales or closing support cases.",
+    "success_criteria": [
+      "The assistant preserves the website support and Telegram handoff scope.",
+      "It recognizes that the new capability is materially ambiguous and asks one concise meaning-level clarification instead of silently choosing ticket closure or sales closing.",
+      "It explains the practical consequence of the two interpretations and continues toward a scoped solution.",
+      "It does not request FAQs, scripts, payment, checkout, or a deposit."
+    ],
+    "language": "en"
+  },
+  {
+    "id": "assistant-drafts-instead-of-customer-homework",
+    "messages": [
+      "We need a customer support bot for our website.",
+      "It should handle common questions and send difficult cases to our team.",
+      "We do not have FAQs or scripts yet. Can you still help?"
+    ],
+    "persona": "A buyer with a clear outcome but no prepared implementation artifacts.",
+    "success_criteria": [
+      "The assistant does not block progress or repeat a demand for customer-authored FAQs, scripts, templates, or specifications.",
+      "It proposes a concrete first-draft solution structure or discovery approach using the known outcome.",
+      "It exposes only material assumptions and asks at most one high-information question.",
+      "It does not introduce an unrelated paid audit, fixed-price package, checkout, or deposit."
+    ],
+    "language": "en"
+  },
+  {
+    "id": "price-exploration-is-not-offer-acceptance",
+    "messages": [
+      "How much does an AI support bot usually cost?",
+      "We are only exploring and have not decided on channels or integrations."
+    ],
+    "persona": "An early-stage buyer asking for pricing before the material scope is known.",
+    "success_criteria": [
+      "The assistant treats the price question as evaluation, not acceptance or transaction authorization.",
+      "It does not push a paid audit, unrelated package, checkout, deposit, or invented fixed price.",
+      "If grounded price information is relevant, it frames it with scope-dependent assumptions rather than presenting a canned anchor.",
+      "It asks only for the single scope variable that most changes the estimate and remains useful."
+    ],
+    "language": "en"
+  }
+]

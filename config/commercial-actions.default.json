@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "selection_mode": "language_model_semantic_reasoning",
+  "instructions": {
+    "purpose": "Expose validated commercial next actions to the conversational model without scripting the dialogue.",
+    "natural_language_only": true,
+    "response_templates_forbidden": true,
+    "keyword_routing_forbidden": true,
+    "invented_amounts_forbidden": true
+  },
+  "checkout": {
+    "provider_name": null,
+    "url": null,
+    "sign_in_method": null,
+    "funding_control": null,
+    "settlement_currency": "USD",
+    "credit_value_usd": null,
+    "payment_methods": [],
+    "post_payment_process": null
+  },
+  "payment_options": [
+    {
+      "id": "deposit",
+      "enabled": false,
+      "label": "Deposit",
+      "fraction_of_grounded_total": null
+    },
+    {
+      "id": "full_payment",
+      "enabled": false,
+      "label": "Full payment",
+      "fraction_of_grounded_total": 1
+    }
+  ],
+  "actions": [
+    {
+      "id": "request_required_fact",
+      "enabled": true,
+      "objective": "Ask for exactly one unresolved fact only when its answer materially changes the recommendation, architecture, scope, estimate, delivery risk, or next executable action. Supply a concise semantic rationale from the conversation, durable state, or authoritative knowledge; a literal source quotation is not required.",
+      "requires_grounded_total": false,
+      "requires_payment_option": false,
+      "requires_grounded_missing_fact": true,
+      "allows_missing_fact": true,
+      "allowed_payment_options": []
+    },
+    {
+      "id": "request_payment_choice",
+      "enabled": false,
+      "objective": "When an exact total is grounded and the customer is ready, let the customer choose among the enabled payment options.",
+      "requires_grounded_total": true,
+      "requires_payment_option": false,
+      "allowed_payment_options": [
+        "deposit",
+        "full_payment"
+      ],
+      "requires_explicit_authorization": true,
+      "authorization_source": "newest_inbound_message",
+      "requires_unambiguous_exact_option": true,
+      "on_missing_authorization": "continue_conversation"
+    },
+    {
+      "id": "present_checkout",
+      "enabled": false,
+      "exposes_checkout": true,
+      "objective": "When an exact total and payment option are grounded, give the customer the validated checkout action and obtain a payment commitment.",
+      "requires_grounded_total": true,
+      "requires_payment_option": true,
+      "allowed_payment_options": [
+        "deposit",
+        "full_payment"
+      ],
+      "requires_explicit_authorization": true,
+      "authorization_source": "newest_inbound_message",
+      "requires_unambiguous_exact_option": true,
+      "on_missing_authorization": "continue_conversation"
+    }
+  ],
+  "semantic_progression_policy": {
+    "authority": "language_model_semantic_reasoning",
+    "rules": [
+        "Treat a fact as a material blocker only when a concise semantic rationale explains why its answer materially changes the recommendation, architecture, scope, estimate, delivery risk, or next executable action.",
+        "Do not convert already answered, generic, or merely useful discovery details into mandatory blockers.",
+      "Do not repeat a qualifier already requested unless the customer asks for clarification.",
+      "When scope is sufficiently understood and no grounded total exists, provide a grounded solution hypothesis and seek one decision that materially determines scope, delivery, or the next executable action. Do not create a pseudo-action for future preparation.",
+      "Request one concrete customer commitment that advances the transaction."
+    ]
+  },
+  "review_contract": {
+    "independently_review_semantic_fit": true,
+    "reject_invented_material_blockers": true,
+    "reject_repeated_qualifiers": true,
+    "require_nearest_useful_commercial_step": true,
+    "prohibit_customer_facing_tool_metadata": true
+  },
+  "conversation_policy": {
+    "mode": "consultative_semantic",
+    "discovery_before_transaction": true,
+    "paid_discovery_is_not_default": true,
+    "one_high_information_question_per_turn": true,
+    "preserve_shared_context_across_workstreams": true,
+    "reset_transaction_readiness_on_workstream_change": true,
+    "prohibit_canned_sales_scripts": true,
+    "transactional_authorization": {
+      "source": "newest_inbound_message",
+      "explicit": true,
+      "unambiguous": true,
+      "exact_action_and_option": true,
+      "ambiguous_confirmation_requires_clarification": true
+    }
+  }
+}

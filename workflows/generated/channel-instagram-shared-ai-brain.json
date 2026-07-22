@@ -1,0 +1,277 @@
+{
+  "name": "Channel - Instagram - Shared AI Brain",
+  "active": false,
+  "nodes": [
+    {
+      "id": "30204283-4773-4084-ade3-172e9068fe5f",
+      "name": "Architecture",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -700,
+        -50
+      ],
+      "parameters": {
+        "content": "## Instagram transport adapter\nThis workflow contains no sales or language logic.\nIt verifies Meta, normalizes inbound Instagram messages, calls the shared LangGraph brain, and delivers only approved replies.\nAll memory, RAG, model routing, escalation, and meaning remain outside n8n.",
+        "height": 300,
+        "width": 520,
+        "color": 5
+      }
+    },
+    {
+      "id": "b0638660-9241-4a57-afda-a4b9b05ef396",
+      "name": "Instagram verification",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        420
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "instagram-rag-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "b9811efb-7088-49f7-a148-e7f228971921"
+    },
+    {
+      "id": "fbd23c3c-b48f-4c0f-a54e-6a20e8bd915a",
+      "name": "Validate verification token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -330,
+        420
+      ],
+      "parameters": {
+        "jsCode": "const query = $json.query ?? {};\nconst valid = query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === '__IG_WEBHOOK_VERIFY_TOKEN__';\nif (!valid) throw new Error('Invalid Instagram webhook verification request');\nreturn [{ json: { challenge: String(query['hub.challenge'] ?? '') } }];"
+      }
+    },
+    {
+      "id": "4349b776-cf09-42e6-a5f5-2373ffbc3108",
+      "name": "Return challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -60,
+        420
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "af50d818-25fe-4988-a86b-f5f144806451",
+      "name": "Instagram messages",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        760
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "instagram-rag-webhook",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "3bd9a2b3-09f0-40ba-a95f-ba25e10e0e98"
+    },
+    {
+      "id": "a785a18c-b96e-43db-a068-25ff95a56806",
+      "name": "Normalize Instagram messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -330,
+        760
+      ],
+      "parameters": {
+        "jsCode": "const envelope = $json.body ?? $json;\nif (envelope.object !== 'instagram') return [];\nconst output = [];\nfor (const entry of envelope.entry ?? []) {\n  for (const event of entry.messaging ?? []) {\n    const text = String(event.message?.text ?? \"\").trim();\n    if (!text || event.message?.is_echo === true) continue;\n    const sender = String(event.sender?.id ?? \"\");\n    if (!sender) continue;\n    output.push({ json: {\n      tenant_key: '__BRAIN_TENANT_KEY__',\n      channel: 'instagram',\n      external_user_id: sender,\n      external_thread_id: sender,\n      external_message_id: String(event.message?.mid ?? (entry.id + \":\" + event.timestamp + \":\" + sender)),\n      text,\n      display_name: null,\n      recipient_id: sender,\n      metadata: { account_id: String(entry.id ?? \"\"), timestamp: event.timestamp ?? null }\n    } });\n  }\n}\nreturn output;"
+      }
+    },
+    {
+      "id": "ee991e94-12d9-4369-a3dc-2fdc6cc4e9c0",
+      "name": "Ask shared AI brain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        680
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__BRAIN_API_URL__/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __BRAIN_API_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "668c8815-39bd-4050-a38b-0c47dfed39a4",
+      "name": "Restore delivery context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        260,
+        760
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      }
+    },
+    {
+      "id": "f1f6798e-7664-41d9-a3bf-b45b8ad3f6fb",
+      "name": "Deliver only when brain approves",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        760
+      ],
+      "parameters": {
+        "jsCode": "const reply = String($json.reply ?? '').trim();\nif ($json.should_reply !== true || !reply) return [];\nreturn [{ json: { ...$json, reply } }];"
+      }
+    },
+    {
+      "id": "c54b0c70-8bca-4e0a-a034-65cb7b1e923b",
+      "name": "Send Instagram reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        770,
+        760
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.instagram.com/__IG_GRAPH_API_VERSION__/__IG_API_USER_ID__/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer __IG_ACCESS_TOKEN__"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ recipient: { id: $json.recipient_id }, message: { text: $json.reply } }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Instagram verification": {
+      "main": [
+        [
+          {
+            "node": "Validate verification token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate verification token": {
+      "main": [
+        [
+          {
+            "node": "Return challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram messages": {
+      "main": [
+        [
+          {
+            "node": "Normalize Instagram messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Instagram messages": {
+      "main": [
+        [
+          {
+            "node": "Ask shared AI brain",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Restore delivery context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask shared AI brain": {
+      "main": [
+        [
+          {
+            "node": "Restore delivery context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Restore delivery context": {
+      "main": [
+        [
+          {
+            "node": "Deliver only when brain approves",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deliver only when brain approves": {
+      "main": [
+        [
+          {
+            "node": "Send Instagram reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

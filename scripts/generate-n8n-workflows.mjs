@@ -1,469 +1,399 @@
-import { createHash } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const outDir = join(root, 'workflows');
+const outputDirectory = path.resolve('workflows/generated');
 
 function stableId(value) {
-  const hex = createHash('sha256').update(value).digest('hex').slice(0, 32);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+  const hash = crypto.createHash('md5').update(value).digest('hex');
+  return [hash.slice(0, 8), hash.slice(8, 12), '4' + hash.slice(13, 16), 'a' + hash.slice(17, 20), hash.slice(20, 32)].join('-');
 }
 
-function node(workflow, name, type, position, parameters, typeVersion = 1) {
+function node(workflowName, name, type, typeVersion, position, parameters, extra = {}) {
   return {
-    parameters,
-    id: stableId(`${workflow}:${name}`),
+    id: stableId(workflowName + ':' + name),
     name,
     type,
     typeVersion,
     position,
+    parameters,
+    ...extra,
   };
 }
 
-function sticky(workflow, name, position, content, width = 520, height = 300) {
-  return node(workflow, name, 'n8n-nodes-base.stickyNote', position, {
+function note(workflowName, name, content, position, size = [500, 250], color = 5) {
+  return node(workflowName, name, 'n8n-nodes-base.stickyNote', 1, position, {
     content,
-    width,
-    height,
-    color: 5,
+    height: size[1],
+    width: size[0],
+    color,
   });
 }
 
-function webhook(workflow, name, position, httpMethod, path, responseMode = 'onReceived') {
-  const parameters = {
-    httpMethod,
-    path,
+function webhook(workflowName, name, method, webhookPath, position, responseMode = 'onReceived') {
+  return node(workflowName, name, 'n8n-nodes-base.webhook', 2.1, position, {
+    httpMethod: method,
+    path: webhookPath,
     responseMode,
-    options: responseMode === 'onReceived' ? { responseCode: 200 } : {},
-  };
-  return {
-    ...node(workflow, name, 'n8n-nodes-base.webhook', position, parameters, 2),
-    webhookId: stableId(`${workflow}:${name}:webhook`),
-  };
-}
-
-function code(workflow, name, position, jsCode) {
-  return node(workflow, name, 'n8n-nodes-base.code', position, { jsCode }, 2);
-}
-
-function http(workflow, name, position, parameters) {
-  return node(workflow, name, 'n8n-nodes-base.httpRequest', position, parameters, 4.2);
-}
-
-function respond(workflow, name, position, respondWith = 'json', responseBody = '={{ $json }}') {
-  return node(workflow, name, 'n8n-nodes-base.respondToWebhook', position, {
-    respondWith,
-    responseBody,
     options: {},
-  }, 1.4);
+  }, { webhookId: stableId(workflowName + ':' + name + ':webhook') });
 }
 
-function edge(nodeName, index = 0) {
-  return { node: nodeName, type: 'main', index };
+function code(workflowName, name, jsCode, position) {
+  return node(workflowName, name, 'n8n-nodes-base.code', 2, position, { jsCode });
 }
 
-function brainRequest(workflow, position) {
-  return http(workflow, 'Call Shared Brain API', position, {
-    method: 'POST',
-    url: "={{ ($env.BRAIN_API_URL || 'http://127.0.0.1:8789').replace(/\\/$/, '') + '/v1/messages' }}",
-    sendHeaders: true,
-    headerParameters: {
-      parameters: [{ name: 'Authorization', value: "={{ 'Bearer ' + $env.BRAIN_API_TOKEN }}" }],
-    },
-    sendBody: true,
-    specifyBody: 'json',
-    jsonBody: '={{ JSON.stringify($json) }}',
-    options: { timeout: 120000 },
-  });
-}
-
-function sendGuard(workflow, position) {
-  return code(workflow, 'Operational Send Guard', position, [
-    "if (!$json.should_send || typeof $json.reply_text !== 'string' || !$json.reply_text.trim()) return [];",
-    'return [{ json: $json }];',
-  ].join('\n'));
-}
-
-function metaVerifyCode(tokenEnv) {
-  return [
-    'const query = $json.query ?? {};',
-    `const expected = $env.${tokenEnv};`,
-    "const valid = Boolean(expected) && query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === expected;",
-    "return [{ json: { status: valid ? 200 : 403, body: valid ? String(query['hub.challenge'] ?? '') : 'Forbidden' } }];",
-  ].join('\n');
-}
-
-function verifyResponse(workflow, name, position) {
-  const result = respond(workflow, name, position, 'text', '={{ $json.body }}');
-  result.parameters.options = { responseCode: '={{ $json.status }}' };
-  return result;
-}
-
-function adminAuthCode() {
-  return [
-    'const headers = $json.headers ?? {};',
-    "const supplied = headers['x-admin-token'] ?? headers['X-Admin-Token'];",
-    "if (!$env.BRAIN_ADMIN_TOKEN || supplied !== $env.BRAIN_ADMIN_TOKEN) throw new Error('Unauthorized');",
-    'return [{ json: $json.body ?? {} }];',
-  ].join('\n');
-}
-
-function brainAdminRequest(workflow, name, position, method, endpoint, body = true) {
+function http(workflowName, name, method, url, body, position, tokenMarker, extraHeaders = []) {
+  const headers = tokenMarker ? [{ name: 'Authorization', value: 'Bearer ' + tokenMarker }] : [];
+  headers.push(...extraHeaders);
   const parameters = {
     method,
-    url: `={{ ($env.BRAIN_API_URL || 'http://127.0.0.1:8789').replace(/\\/$/, '') + '${endpoint}' }}`,
-    sendHeaders: true,
-    headerParameters: {
-      parameters: [{ name: 'Authorization', value: "={{ 'Bearer ' + $env.BRAIN_ADMIN_TOKEN }}" }],
-    },
-    options: { timeout: 120000 },
+    url,
+    sendHeaders: headers.length > 0,
+    headerParameters: { parameters: headers },
+    sendBody: body !== null,
+    contentType: 'raw',
+    rawContentType: 'application/json',
+    body: body === null ? undefined : body,
+    options: {},
   };
-  if (body) {
-    parameters.sendBody = true;
-    parameters.specifyBody = 'json';
-    parameters.jsonBody = '={{ JSON.stringify($json) }}';
+  if (body === null) {
+    delete parameters.contentType;
+    delete parameters.rawContentType;
+    delete parameters.body;
   }
-  return http(workflow, name, position, parameters);
+  return node(workflowName, name, 'n8n-nodes-base.httpRequest', 4.2, position, parameters);
+}
+
+function merge(workflowName, name, position) {
+  return node(workflowName, name, 'n8n-nodes-base.merge', 3.2, position, {
+    mode: 'combine',
+    combineBy: 'combineByPosition',
+    options: {},
+  });
+}
+
+function manual(workflowName, position = [0, 300]) {
+  return node(workflowName, 'Run manually', 'n8n-nodes-base.manualTrigger', 1, position, {});
+}
+
+function responseNode(workflowName, name, body, position) {
+  return node(workflowName, name, 'n8n-nodes-base.respondToWebhook', 1.4, position, {
+    respondWith: 'text',
+    responseBody: body,
+    options: {
+      responseHeaders: {
+        entries: [{ name: 'Content-Type', value: 'text/plain; charset=utf-8' }],
+      },
+    },
+  });
+}
+
+function connect(connections, from, to, targetInput = 0) {
+  if (!connections[from]) connections[from] = { main: [[]] };
+  connections[from].main[0].push({ node: to, type: 'main', index: targetInput });
 }
 
 function workflow(name, nodes, connections) {
-  return {
-    name,
-    nodes,
-    pinData: {},
-    connections,
-    active: false,
-    settings: {
-      executionOrder: 'v1',
-      saveManualExecutions: true,
-      callerPolicy: 'workflowsFromSameOwner',
-    },
-    versionId: stableId(`${name}:version`),
-    meta: {
-      templateCredsSetupCompleted: false,
-    },
-    tags: [],
-  };
+  return { name, active: false, nodes, connections, settings: { executionOrder: 'v1' } };
+}
+
+function brainHttp(workflowName, position) {
+  return http(
+    workflowName,
+    'Ask shared AI brain',
+    'POST',
+    '__BRAIN_API_URL__/v1/messages',
+    '={{ JSON.stringify($json) }}',
+    position,
+    '__BRAIN_API_TOKEN__',
+  );
+}
+
+function prepareReplyCode() {
+  return [
+    "const reply = String($json.reply ?? '').trim();",
+    'if ($json.should_reply !== true || !reply) return [];',
+    'return [{ json: { ...$json, reply } }];',
+  ].join('\n');
 }
 
 function instagramWorkflow() {
-  const name = 'Channel Adapter: Instagram -> Shared Brain';
-  const normalize = [
-    'const body = $json.body ?? $json;',
-    'const events = (body.entry ?? []).flatMap((entry) => entry.messaging ?? []);',
-    'const event = events.find((item) => item?.message?.text && !item.message.is_echo);',
-    'if (!event) return [];',
-    'return [{ json: {',
-    "  tenant_key: $env.BRAIN_TENANT_KEY || 'default',",
-    "  channel: 'instagram',",
-    '  external_user_id: String(event.sender?.id ?? \'\'),',
-    '  channel_conversation_id: String(event.sender?.id ?? \'\'),',
-    '  external_message_id: String(event.message?.mid ?? event.timestamp ?? \'\'),',
-    '  text: String(event.message.text),',
-    '  metadata: { recipient_id: event.recipient?.id ?? null, received_at: event.timestamp ?? null },',
-    '} }];',
-  ].join('\n');
-
-  const nodes = [
-    sticky(name, 'READ ME - Replaceable Transport Shell', [-900, -420], [
-      '# Instagram transport only',
-      '',
-      'This workflow does not contain company knowledge, sales policy, memory, RAG, or semantic routing. It only verifies Meta, normalizes an inbound event, calls the Shared Brain API, and delivers a permitted response.',
-      '',
-      'Required runtime values: `IG_WEBHOOK_VERIFY_TOKEN`, `IG_ACCESS_TOKEN`, `IG_MESSAGES_ENDPOINT`, `BRAIN_API_URL`, `BRAIN_API_TOKEN`, `BRAIN_TENANT_KEY`.',
-      '',
-      'Set the Meta callback to the production webhook URL only after credentials are configured. Keep this workflow inactive in the public template.',
-    ].join('\n'), 620, 330),
-    webhook(name, 'Instagram Webhook Verification', [-860, 20], 'GET', 'instagram-rag-webhook', 'responseNode'),
-    code(name, 'Verify Instagram Subscription', [-620, 20], metaVerifyCode('IG_WEBHOOK_VERIFY_TOKEN')),
-    verifyResponse(name, 'Return Meta Challenge', [-360, 20]),
-    webhook(name, 'Instagram Message Receiver', [-860, 260], 'POST', 'instagram-rag-webhook'),
-    code(name, 'Normalize Instagram Message', [-620, 260], normalize),
-    brainRequest(name, [-330, 260]),
-    sendGuard(name, [-40, 260]),
-    http(name, 'Send Instagram Reply', [250, 260], {
-      method: 'POST',
-      url: '={{ $env.IG_MESSAGES_ENDPOINT }}',
-      sendHeaders: true,
-      headerParameters: { parameters: [
-        { name: 'Authorization', value: "={{ 'Bearer ' + $env.IG_ACCESS_TOKEN }}" },
-        { name: 'Content-Type', value: 'application/json' },
-      ] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: '={{ JSON.stringify({ recipient: { id: $node["Normalize Instagram Message"].json.external_user_id }, message: { text: $json.reply_text } }) }}',
-      options: { timeout: 30000 },
-    }),
-  ];
-
-  return workflow(name, nodes, {
-    'Instagram Webhook Verification': { main: [[edge('Verify Instagram Subscription')]] },
-    'Verify Instagram Subscription': { main: [[edge('Return Meta Challenge')]] },
-    'Instagram Message Receiver': { main: [[edge('Normalize Instagram Message')]] },
-    'Normalize Instagram Message': { main: [[edge('Call Shared Brain API')]] },
-    'Call Shared Brain API': { main: [[edge('Operational Send Guard')]] },
-    'Operational Send Guard': { main: [[edge('Send Instagram Reply')]] },
-  });
-}
-
-function telegramWorkflow() {
-  const name = 'Channel Adapter: Telegram -> Shared Brain';
-  const normalize = [
-    'const message = $json.message ?? $json.edited_message;',
-    'if (!message?.text || message.from?.is_bot) return [];',
-    'return [{ json: {',
-    "  tenant_key: $env.BRAIN_TENANT_KEY || 'default',",
-    "  channel: 'telegram',",
-    '  external_user_id: String(message.from.id),',
-    '  channel_conversation_id: String(message.chat.id),',
-    '  external_message_id: String(message.message_id),',
-    '  text: String(message.text),',
-    '  metadata: { username: message.from.username ?? null, first_name: message.from.first_name ?? null },',
-    '} }];',
-  ].join('\n');
-
-  const trigger = node(name, 'Telegram Trigger', [-800, 220], 'n8n-nodes-base.telegramTrigger', {
-    updates: ['message', 'edited_message'],
-    additionalFields: {},
-  }, 1.2);
-
-  const send = node(name, 'Send Telegram Reply', [280, 220], 'n8n-nodes-base.telegram', {
-    resource: 'message',
-    operation: 'sendMessage',
-    chatId: '={{ $node["Normalize Telegram Message"].json.channel_conversation_id }}',
-    text: '={{ $json.reply_text }}',
-    additionalFields: { appendAttribution: false },
-  }, 1.2);
-
-  return workflow(name, [
-    sticky(name, 'READ ME - Native Telegram Adapter', [-840, -300], [
-      '# Telegram transport only',
-      '',
-      'Attach one Telegram credential to both Telegram nodes. The shared Brain API owns all language, memory, RAG, sales/support behavior, and escalation decisions.',
-      '',
-      'Required runtime values: `BRAIN_API_URL`, `BRAIN_API_TOKEN`, `BRAIN_TENANT_KEY`.',
-      '',
-      'No company content belongs in this workflow. Keep it inactive in the public template.',
-    ].join('\n'), 600, 290),
-    trigger,
-    code(name, 'Normalize Telegram Message', [-530, 220], normalize),
-    brainRequest(name, [-240, 220]),
-    sendGuard(name, [40, 220]),
-    send,
-  ], {
-    'Telegram Trigger': { main: [[edge('Normalize Telegram Message')]] },
-    'Normalize Telegram Message': { main: [[edge('Call Shared Brain API')]] },
-    'Call Shared Brain API': { main: [[edge('Operational Send Guard')]] },
-    'Operational Send Guard': { main: [[edge('Send Telegram Reply')]] },
-  });
+  const name = 'Channel - Instagram - Shared AI Brain';
+  const nodes = [];
+  const connections = {};
+  nodes.push(note(name, 'Architecture', [
+    '## Instagram transport adapter',
+    'This workflow contains no sales or language logic.',
+    'It verifies Meta, normalizes inbound Instagram messages, calls the shared LangGraph brain, and delivers only approved replies.',
+    'All memory, RAG, model routing, escalation, and meaning remain outside n8n.',
+  ].join('\n'), [-700, -50], [520, 300], 5));
+  nodes.push(webhook(name, 'Instagram verification', 'GET', 'instagram-rag-webhook', [-600, 420], 'responseNode'));
+  nodes.push(code(name, 'Validate verification token', [
+    "const query = $json.query ?? {};",
+    "const valid = query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === '__IG_WEBHOOK_VERIFY_TOKEN__';",
+    "if (!valid) throw new Error('Invalid Instagram webhook verification request');",
+    "return [{ json: { challenge: String(query['hub.challenge'] ?? '') } }];",
+  ].join('\n'), [-330, 420]));
+  nodes.push(responseNode(name, 'Return challenge', '={{ $json.challenge }}', [-60, 420]));
+  nodes.push(webhook(name, 'Instagram messages', 'POST', 'instagram-rag-webhook', [-600, 760]));
+  nodes.push(code(name, 'Normalize Instagram messages', [
+    'const envelope = $json.body ?? $json;',
+    "if (envelope.object !== 'instagram') return [];",
+    'const output = [];',
+    'for (const entry of envelope.entry ?? []) {',
+    '  for (const event of entry.messaging ?? []) {',
+    '    const text = String(event.message?.text ?? "").trim();',
+    '    if (!text || (event.message?.is_echo || event.message?.is_self) === true) continue;',
+    '    const sender = String(event.sender?.id ?? "");',
+    '    if (!sender) continue;',
+    '    output.push({ json: {',
+    "      tenant_key: '__BRAIN_TENANT_KEY__',",
+    "      channel: 'instagram',",
+    '      external_user_id: sender,',
+    '      external_thread_id: sender,',
+    '      external_message_id: String(event.message?.mid ?? (entry.id + ":" + event.timestamp + ":" + sender)),',
+    '      text,',
+    '      display_name: null,',
+    '      recipient_id: sender,',
+    '      metadata: { account_id: String(entry.id ?? ""), timestamp: event.timestamp ?? null }',
+    '    } });',
+    '  }',
+    '}',
+    'return output;',
+  ].join('\n'), [-330, 760]));
+  nodes.push(brainHttp(name, [0, 680]));
+  nodes.push(merge(name, 'Restore delivery context', [260, 760]));
+  nodes.push(code(name, 'Deliver only when brain approves', prepareReplyCode(), [500, 760]));
+  nodes.push(http(name, 'Send Instagram reply', 'POST', 'https://graph.instagram.com/__IG_GRAPH_API_VERSION__/__IG_API_USER_ID__/messages',
+    '={{ JSON.stringify({ recipient: { id: $json.recipient_id }, message: { text: $json.reply } }) }}', [770, 760], '__IG_ACCESS_TOKEN__'));
+  connect(connections, 'Instagram verification', 'Validate verification token');
+  connect(connections, 'Validate verification token', 'Return challenge');
+  connect(connections, 'Instagram messages', 'Normalize Instagram messages');
+  connect(connections, 'Normalize Instagram messages', 'Ask shared AI brain');
+  connect(connections, 'Normalize Instagram messages', 'Restore delivery context', 0);
+  connect(connections, 'Ask shared AI brain', 'Restore delivery context', 1);
+  connect(connections, 'Restore delivery context', 'Deliver only when brain approves');
+  connect(connections, 'Deliver only when brain approves', 'Send Instagram reply');
+  return workflow(name, nodes, connections);
 }
 
 function whatsappWorkflow() {
-  const name = 'Channel Adapter: WhatsApp -> Shared Brain';
-  const normalize = [
-    'const body = $json.body ?? $json;',
-    'const values = (body.entry ?? []).flatMap((entry) => (entry.changes ?? []).map((change) => change.value ?? {}));',
-    'const value = values.find((item) => Array.isArray(item.messages) && item.messages.length);',
-    'const message = value?.messages?.[0];',
-    'const text = message?.text?.body ?? message?.button?.text ?? message?.interactive?.button_reply?.title ?? message?.interactive?.list_reply?.title;',
-    'if (!message || !text) return [];',
-    'const contact = value.contacts?.find((item) => item.wa_id === message.from) ?? value.contacts?.[0];',
+  const name = 'Channel - WhatsApp - Shared AI Brain';
+  const nodes = [];
+  const connections = {};
+  nodes.push(note(name, 'Architecture', [
+    '## WhatsApp transport adapter',
+    'Only transport-specific parsing lives here. The shared brain decides language, intent, sales behavior, tools, RAG, and escalation.',
+    'Status callbacks are acknowledged and ignored; user messages are idempotent in PostgreSQL.',
+  ].join('\n'), [-700, -50], [520, 280], 5));
+  nodes.push(webhook(name, 'WhatsApp verification', 'GET', 'whatsapp-rag-webhook', [-600, 420], 'responseNode'));
+  nodes.push(code(name, 'Validate verification token', [
+    "const query = $json.query ?? {};",
+    "const valid = query['hub.mode'] === 'subscribe' && query['hub.verify_token'] === '__WHATSAPP_WEBHOOK_VERIFY_TOKEN__';",
+    "if (!valid) throw new Error('Invalid WhatsApp webhook verification request');",
+    "return [{ json: { challenge: String(query['hub.challenge'] ?? '') } }];",
+  ].join('\n'), [-330, 420]));
+  nodes.push(responseNode(name, 'Return challenge', '={{ $json.challenge }}', [-60, 420]));
+  nodes.push(webhook(name, 'WhatsApp messages', 'POST', 'whatsapp-rag-webhook', [-600, 760]));
+  nodes.push(code(name, 'Normalize WhatsApp messages', [
+    'const envelope = $json.body ?? $json;',
+    "if (envelope.object !== 'whatsapp_business_account') return [];",
+    'const output = [];',
+    'for (const entry of envelope.entry ?? []) {',
+    '  for (const change of entry.changes ?? []) {',
+    '    const value = change.value ?? {};',
+    '    const names = new Map((value.contacts ?? []).map((item) => [String(item.wa_id), item.profile?.name ?? null]));',
+    '    for (const message of value.messages ?? []) {',
+    '      const text = String(message.text?.body ?? message.button?.text ?? message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? message.image?.caption ?? message.document?.caption ?? "").trim();',
+    '      if (!text) continue;',
+    '      const sender = String(message.from ?? "");',
+    '      if (!sender) continue;',
+    '      output.push({ json: {',
+    "        tenant_key: '__BRAIN_TENANT_KEY__',",
+    "        channel: 'whatsapp',",
+    '        external_user_id: sender,',
+    '        external_thread_id: sender,',
+    '        external_message_id: String(message.id),',
+    '        text,',
+    '        display_name: names.get(sender) ?? null,',
+    '        recipient_id: sender,',
+    '        metadata: { phone_number_id: String(value.metadata?.phone_number_id ?? ""), message_type: message.type ?? "text", timestamp: message.timestamp ?? null }',
+    '      } });',
+    '    }',
+    '  }',
+    '}',
+    'return output;',
+  ].join('\n'), [-330, 760]));
+  nodes.push(brainHttp(name, [0, 680]));
+  nodes.push(merge(name, 'Restore delivery context', [260, 760]));
+  nodes.push(code(name, 'Deliver only when brain approves', prepareReplyCode(), [500, 760]));
+  nodes.push(http(name, 'Send WhatsApp reply', 'POST', 'https://graph.facebook.com/__WHATSAPP_GRAPH_API_VERSION__/__WHATSAPP_PHONE_NUMBER_ID__/messages',
+    '={{ JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: $json.recipient_id, type: "text", text: { preview_url: false, body: $json.reply } }) }}', [770, 760], '__WHATSAPP_ACCESS_TOKEN__'));
+  connect(connections, 'WhatsApp verification', 'Validate verification token');
+  connect(connections, 'Validate verification token', 'Return challenge');
+  connect(connections, 'WhatsApp messages', 'Normalize WhatsApp messages');
+  connect(connections, 'Normalize WhatsApp messages', 'Ask shared AI brain');
+  connect(connections, 'Normalize WhatsApp messages', 'Restore delivery context', 0);
+  connect(connections, 'Ask shared AI brain', 'Restore delivery context', 1);
+  connect(connections, 'Restore delivery context', 'Deliver only when brain approves');
+  connect(connections, 'Deliver only when brain approves', 'Send WhatsApp reply');
+  return workflow(name, nodes, connections);
+}
+
+function telegramWorkflow() {
+  const name = 'Channel - Telegram - Shared AI Brain';
+  const nodes = [];
+  const connections = {};
+  nodes.push(note(name, 'Architecture', [
+    '## Telegram transport adapter',
+    'Telegram webhook authentication and normalization only. No language, intent, or sales branches.',
+    'The same PostgreSQL memory and shared AI brain are used by all channels.',
+  ].join('\n'), [-700, -50], [520, 260], 5));
+  nodes.push(webhook(name, 'Telegram messages', 'POST', 'telegram-rag-webhook', [-600, 540]));
+  nodes.push(code(name, 'Authenticate and normalize Telegram', [
+    "const actualSecret = String($json.headers?.['x-telegram-bot-api-secret-token'] ?? '');",
+    "if (actualSecret !== '__TELEGRAM_WEBHOOK_SECRET__') throw new Error('Invalid Telegram webhook secret');",
+    'const update = $json.body ?? $json;',
+    'const message = update.message ?? update.edited_message;',
+    'if (!message) return [];',
+    'const text = String(message.text ?? message.caption ?? "").trim();',
+    'if (!text) return [];',
+    'const sender = String(message.from?.id ?? message.chat?.id ?? "");',
+    'const chat = String(message.chat?.id ?? sender);',
+    'if (!sender || !chat) return [];',
+    'const displayName = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ") || message.from?.username || null;',
     'return [{ json: {',
-    "  tenant_key: $env.BRAIN_TENANT_KEY || 'default',",
-    "  channel: 'whatsapp',",
-    '  external_user_id: String(message.from),',
-    '  channel_conversation_id: String(message.from),',
-    '  external_message_id: String(message.id),',
-    '  text: String(text),',
-    '  metadata: { profile_name: contact?.profile?.name ?? null, message_type: message.type ?? null },',
+    "  tenant_key: '__BRAIN_TENANT_KEY__',",
+    "  channel: 'telegram',",
+    '  external_user_id: sender,',
+    '  external_thread_id: chat,',
+    '  external_message_id: String(update.update_id ?? (chat + ":" + message.message_id)),',
+    '  text,',
+    '  display_name: displayName,',
+    '  recipient_id: chat,',
+    '  metadata: { username: message.from?.username ?? null, message_id: message.message_id ?? null }',
     '} }];',
-  ].join('\n');
-
-  return workflow(name, [
-    sticky(name, 'READ ME - WhatsApp Cloud Adapter', [-900, -420], [
-      '# WhatsApp Cloud transport only',
-      '',
-      'This workflow handles webhook verification, inbound normalization, Brain API invocation, and Cloud API delivery. Status events are acknowledged but not sent to the model.',
-      '',
-      'Required runtime values: `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION`, `BRAIN_API_URL`, `BRAIN_API_TOKEN`, `BRAIN_TENANT_KEY`.',
-      '',
-      'Keep it inactive in the public template.',
-    ].join('\n'), 640, 330),
-    webhook(name, 'WhatsApp Webhook Verification', [-860, 20], 'GET', 'whatsapp-rag-webhook', 'responseNode'),
-    code(name, 'Verify WhatsApp Subscription', [-620, 20], metaVerifyCode('WHATSAPP_WEBHOOK_VERIFY_TOKEN')),
-    verifyResponse(name, 'Return Meta Challenge', [-360, 20]),
-    webhook(name, 'WhatsApp Message Receiver', [-860, 260], 'POST', 'whatsapp-rag-webhook'),
-    code(name, 'Normalize WhatsApp Message', [-620, 260], normalize),
-    brainRequest(name, [-330, 260]),
-    sendGuard(name, [-40, 260]),
-    http(name, 'Send WhatsApp Reply', [250, 260], {
-      method: 'POST',
-      url: "={{ 'https://graph.facebook.com/' + ($env.WHATSAPP_GRAPH_API_VERSION || 'v25.0') + '/' + $env.WHATSAPP_PHONE_NUMBER_ID + '/messages' }}",
-      sendHeaders: true,
-      headerParameters: { parameters: [
-        { name: 'Authorization', value: "={{ 'Bearer ' + $env.WHATSAPP_ACCESS_TOKEN }}" },
-        { name: 'Content-Type', value: 'application/json' },
-      ] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: '={{ JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: $node["Normalize WhatsApp Message"].json.external_user_id, type: "text", text: { preview_url: false, body: $json.reply_text } }) }}',
-      options: { timeout: 30000 },
-    }),
-  ], {
-    'WhatsApp Webhook Verification': { main: [[edge('Verify WhatsApp Subscription')]] },
-    'Verify WhatsApp Subscription': { main: [[edge('Return Meta Challenge')]] },
-    'WhatsApp Message Receiver': { main: [[edge('Normalize WhatsApp Message')]] },
-    'Normalize WhatsApp Message': { main: [[edge('Call Shared Brain API')]] },
-    'Call Shared Brain API': { main: [[edge('Operational Send Guard')]] },
-    'Operational Send Guard': { main: [[edge('Send WhatsApp Reply')]] },
-  });
+  ].join('\n'), [-330, 540]));
+  nodes.push(brainHttp(name, [0, 460]));
+  nodes.push(merge(name, 'Restore delivery context', [260, 540]));
+  nodes.push(code(name, 'Deliver only when brain approves', prepareReplyCode(), [500, 540]));
+  nodes.push(http(name, 'Send Telegram reply', 'POST', 'https://api.telegram.org/bot__TELEGRAM_BOT_TOKEN__/sendMessage',
+    '={{ JSON.stringify({ chat_id: $json.recipient_id, text: $json.reply }) }}', [770, 540], null));
+  connect(connections, 'Telegram messages', 'Authenticate and normalize Telegram');
+  connect(connections, 'Authenticate and normalize Telegram', 'Ask shared AI brain');
+  connect(connections, 'Authenticate and normalize Telegram', 'Restore delivery context', 0);
+  connect(connections, 'Ask shared AI brain', 'Restore delivery context', 1);
+  connect(connections, 'Restore delivery context', 'Deliver only when brain approves');
+  connect(connections, 'Deliver only when brain approves', 'Send Telegram reply');
+  return workflow(name, nodes, connections);
 }
 
-function testHarnessWorkflow() {
-  const name = 'Operator: Shared Brain Test Harness';
-  const normalize = [
-    "const body = $json;",
-    "if (!body.text || typeof body.text !== 'string') throw new Error('text is required');",
-    'return [{ json: {',
-    "  tenant_key: body.tenant_key || $env.BRAIN_TENANT_KEY || 'default',",
-    "  channel: body.channel || 'internal_test',",
-    "  external_user_id: String(body.external_user_id || 'scenario-user'),",
-    "  channel_conversation_id: String(body.channel_conversation_id || body.external_user_id || 'scenario-thread'),",
-    "  external_message_id: String(body.external_message_id || ('manual-' + Date.now())),",
-    '  text: body.text,',
-    '  metadata: { test_run: true, ...(body.metadata ?? {}) },',
-    '} }];',
-  ].join('\n');
-
-  return workflow(name, [
-    sticky(name, 'READ ME - Channel-Free Testing', [-850, -300], [
-      '# Test the brain without Instagram, Telegram, or WhatsApp',
-      '',
-      'POST JSON to the production webhook with header `x-admin-token`. Reuse the same `external_user_id` and `channel_conversation_id` to test memory across turns.',
-      '',
-      'This harness calls the exact same Brain API contract as every channel. It is an operator surface, not a second chatbot implementation.',
-    ].join('\n'), 620, 270),
-    webhook(name, 'Brain Test Webhook', [-800, 180], 'POST', 'brain-test', 'responseNode'),
-    code(name, 'Authenticate Test Request', [-560, 180], adminAuthCode()),
-    code(name, 'Normalize Test Turn', [-300, 180], normalize),
-    brainRequest(name, [0, 180]),
-    respond(name, 'Return Brain Result', [300, 180]),
-  ], {
-    'Brain Test Webhook': { main: [[edge('Authenticate Test Request')]] },
-    'Authenticate Test Request': { main: [[edge('Normalize Test Turn')]] },
-    'Normalize Test Turn': { main: [[edge('Call Shared Brain API')]] },
-    'Call Shared Brain API': { main: [[edge('Return Brain Result')]] },
-  });
+function operatorWorkflow(name, noteText, configCode, endpoint, method = 'POST') {
+  const nodes = [
+    note(name, 'Instructions', noteText, [-500, -50], [620, 300], 4),
+    manual(name),
+    code(name, 'Editable operator input', configCode, [260, 300]),
+    http(name, 'Apply safely', method, '__BRAIN_API_URL__' + endpoint, '={{ JSON.stringify($json) }}', [560, 300], '__BRAIN_ADMIN_TOKEN__'),
+  ];
+  const connections = {};
+  connect(connections, 'Run manually', 'Editable operator input');
+  connect(connections, 'Editable operator input', 'Apply safely');
+  return workflow(name, nodes, connections);
 }
 
-function resetWorkflow() {
-  const name = 'Operator: Reset Conversation Escalation';
-  return workflow(name, [
-    sticky(name, 'READ ME - Human Handover Reset', [-800, -300], [
-      '# Resume automation after human handover',
-      '',
-      'POST the conversation identity and `x-admin-token`. The Brain API clears the durable pause marker. Until this reset, the model is not called and the bot remains silent.',
-      '',
-      'Required body: `tenant_key` plus either `conversation_id` or `channel` + `channel_conversation_id`.',
-    ].join('\n'), 600, 270),
-    webhook(name, 'Escalation Reset Webhook', [-760, 180], 'POST', 'brain-admin/escalations/reset', 'responseNode'),
-    code(name, 'Authenticate Reset Request', [-500, 180], adminAuthCode()),
-    brainAdminRequest(name, 'Reset Escalation in Brain', [-220, 180], 'POST', '/v1/escalations/reset'),
-    respond(name, 'Return Reset Result', [80, 180]),
-  ], {
-    'Escalation Reset Webhook': { main: [[edge('Authenticate Reset Request')]] },
-    'Authenticate Reset Request': { main: [[edge('Reset Escalation in Brain')]] },
-    'Reset Escalation in Brain': { main: [[edge('Return Reset Result')]] },
-  });
-}
-
-function knowledgeWorkflow() {
-  const name = 'Operator: Knowledge Ingest -> Shared Brain';
-  return workflow(name, [
-    sticky(name, 'READ ME - Generic Knowledge Ingest', [-820, -320], [
-      '# Add tenant knowledge',
-      '',
-      'POST `tenant_key`, `title`, `content`, optional `source_uri`, and optional `metadata` with header `x-admin-token`.',
-      '',
-      'Chunking, embeddings, storage, and tenant isolation belong to the Brain service. Do not put company documents or credentials into this public workflow export.',
-    ].join('\n'), 620, 280),
-    webhook(name, 'Knowledge Ingest Webhook', [-780, 180], 'POST', 'brain-admin/knowledge', 'responseNode'),
-    code(name, 'Authenticate Knowledge Request', [-520, 180], adminAuthCode()),
-    brainAdminRequest(name, 'Ingest Through Brain API', [-240, 180], 'POST', '/v1/knowledge'),
-    respond(name, 'Return Ingest Result', [60, 180]),
-  ], {
-    'Knowledge Ingest Webhook': { main: [[edge('Authenticate Knowledge Request')]] },
-    'Authenticate Knowledge Request': { main: [[edge('Ingest Through Brain API')]] },
-    'Ingest Through Brain API': { main: [[edge('Return Ingest Result')]] },
-  });
-}
-
-function modelAdminWorkflow() {
-  const name = 'Operator: Model Route Control';
-  const manual = node(name, 'Manual Trigger', [-780, 360], 'n8n-nodes-base.manualTrigger', {}, 1);
-  const editor = code(name, 'EDIT ENABLED AND PRIORITY HERE', [-520, 360], [
-    '// Lower priority number runs first. Disabled routes are skipped.',
-    '// Never paste API keys here; keys remain in the private runtime environment.',
+function operatorWorkflows() {
+  const modelName = 'Operator - Model Route Control';
+  const model = operatorWorkflow(modelName, [
+    '## Model priority control',
+    'Edit only the values in Editable operator input, then run this workflow.',
+    'Lower priority numbers run first. Disabled providers are never called.',
+    'Default: Codex Spark, then Codex Mini. DeepSeek and OpenAI are present but disabled.',
+  ].join('\n'), [
     'return [{ json: { routes: [',
     "  { id: 'codex_spark', provider: 'codex_cli', model: 'gpt-5.3-codex-spark', enabled: true, priority: 10, reasoning_effort: 'low' },",
     "  { id: 'codex_mini', provider: 'codex_cli', model: 'gpt-5.4-mini', enabled: true, priority: 20, reasoning_effort: 'low' },",
     "  { id: 'deepseek_flash', provider: 'deepseek', model: 'deepseek-chat', enabled: false, priority: 30 },",
     "  { id: 'openai_api', provider: 'openai', model: 'gpt-4.1', enabled: false, priority: 40 },",
-    "  { id: 'deepseek_reasoner', provider: 'deepseek', model: 'deepseek-reasoner', enabled: false, priority: 50 },",
+    "  { id: 'deepseek_reasoner', provider: 'deepseek', model: 'deepseek-reasoner', enabled: false, priority: 50 }",
     '] } }];',
-  ].join('\n'));
+  ].join('\n'), '/v1/admin/model-routes', 'PUT');
 
-  return workflow(name, [
-    sticky(name, 'READ ME - Human-Friendly Model Routing', [-860, -360], [
-      '# Model failover control',
-      '',
-      'Manual path: open `EDIT ENABLED AND PRIORITY HERE`, change only `enabled` and `priority`, then execute the workflow.',
-      '',
-      'API paths: GET or PUT the `brain-admin/model-routes` webhook using header `x-admin-token`.',
-      '',
-      'Default order: Codex Spark, Codex mini. DeepSeek and OpenAI API are present but disabled. The verified OpenAI stable alias is `gpt-4.1`.',
-      '',
-      'Provider failure and quota errors may fall through; malformed model output and business decisions are never replaced by hard-coded sales templates.',
-    ].join('\n'), 700, 340),
-    webhook(name, 'Get Model Routes Webhook', [-820, 20], 'GET', 'brain-admin/model-routes', 'responseNode'),
-    code(name, 'Authenticate Get Request', [-570, 20], adminAuthCode()),
-    brainAdminRequest(name, 'Read Routes from Brain', [-300, 20], 'GET', '/v1/admin/model-routes', false),
-    respond(name, 'Return Current Routes', [-20, 20]),
-    webhook(name, 'Put Model Routes Webhook', [-820, 180], 'PUT', 'brain-admin/model-routes', 'responseNode'),
-    code(name, 'Authenticate Put Request', [-570, 180], adminAuthCode()),
-    brainAdminRequest(name, 'Update Routes in Brain', [-300, 180], 'PUT', '/v1/admin/model-routes'),
-    respond(name, 'Return Updated Routes', [-20, 180]),
-    manual,
-    editor,
-    brainAdminRequest(name, 'Apply Edited Routes', [-230, 360], 'PUT', '/v1/admin/model-routes'),
-  ], {
-    'Get Model Routes Webhook': { main: [[edge('Authenticate Get Request')]] },
-    'Authenticate Get Request': { main: [[edge('Read Routes from Brain')]] },
-    'Read Routes from Brain': { main: [[edge('Return Current Routes')]] },
-    'Put Model Routes Webhook': { main: [[edge('Authenticate Put Request')]] },
-    'Authenticate Put Request': { main: [[edge('Update Routes in Brain')]] },
-    'Update Routes in Brain': { main: [[edge('Return Updated Routes')]] },
-    'Manual Trigger': { main: [[edge('EDIT ENABLED AND PRIORITY HERE')]] },
-    'EDIT ENABLED AND PRIORITY HERE': { main: [[edge('Apply Edited Routes')]] },
-  });
+  const escalationName = 'Operator - Escalation Reset';
+  const escalation = operatorWorkflow(escalationName, [
+    '## Resume an escalated conversation',
+    'Enter the channel and external user ID from the operator view. Running this clears only the escalation marker; history remains intact.',
+  ].join('\n'), [
+    'return [{ json: {',
+    "  tenant_key: '__BRAIN_TENANT_KEY__',",
+    "  channel: 'telegram',",
+    "  external_user_id: 'REPLACE_WITH_USER_ID'",
+    '} }];',
+  ].join('\n'), '/v1/admin/escalations/reset');
+
+  const identityName = 'Operator - Cross-channel Identity Link';
+  const identity = operatorWorkflow(identityName, [
+    '## Link two channel identities',
+    'Use this only after a human has confirmed both identities belong to the same person. The shared contact then keeps one memory across channels.',
+  ].join('\n'), [
+    'return [{ json: {',
+    "  tenant_key: '__BRAIN_TENANT_KEY__',",
+    "  primary: { channel: 'telegram', external_user_id: 'REPLACE_PRIMARY_ID' },",
+    "  secondary: { channel: 'whatsapp', external_user_id: 'REPLACE_SECONDARY_ID' }",
+    '} }];',
+  ].join('\n'), '/v1/admin/identities/link');
+
+  const knowledgeName = 'Operator - Knowledge Ingest';
+  const knowledge = operatorWorkflow(knowledgeName, [
+    '## Add or replace trusted knowledge',
+    'Paste approved company knowledge into Editable operator input. It is chunked and embedded locally into PostgreSQL/pgvector.',
+    'For many files, use npm run knowledge:ingest instead.',
+  ].join('\n'), [
+    'return [{ json: {',
+    "  tenant_key: '__BRAIN_TENANT_KEY__',",
+    "  source_path: 'operator/manual-note',",
+    "  title: 'Replace with a descriptive title',",
+    "  content: 'Replace with approved company knowledge'",
+    '} }];',
+  ].join('\n'), '/v1/admin/knowledge');
+
+  return [model, escalation, identity, knowledge];
 }
 
-const artifacts = new Map([
-  ['channel-instagram.json', instagramWorkflow()],
-  ['channel-telegram.json', telegramWorkflow()],
-  ['channel-whatsapp.json', whatsappWorkflow()],
-  ['brain-test-harness.json', testHarnessWorkflow()],
-  ['operator-escalation-reset.json', resetWorkflow()],
-  ['knowledge-ingest.json', knowledgeWorkflow()],
-  ['model-route-admin.json', modelAdminWorkflow()],
-]);
-
-await rm(outDir, { recursive: true, force: true });
-await mkdir(outDir, { recursive: true });
-for (const [file, data] of artifacts) {
-  await writeFile(join(outDir, file), `${JSON.stringify(data, null, 2)}\n`, { mode: 0o644 });
+function internalWorkflow() {
+  const name = 'Internal - Brain Test Harness';
+  const nodes = [
+    note(name, 'Instructions', [
+      '## Channel-free brain test',
+      'Run this workflow to test the exact production brain without Instagram, WhatsApp, or Telegram.',
+      'Edit the message and stable user ID to test multi-turn memory. This workflow never sends an external message.',
+    ].join('\n'), [-500, -50], [620, 290], 3),
+    manual(name),
+    code(name, 'Editable test message', [
+      'return [{ json: {',
+      "  tenant_key: '__BRAIN_TENANT_KEY__',",
+      "  channel: 'internal_test',",
+      "  external_user_id: 'n8n-operator-test',",
+      "  external_thread_id: 'n8n-operator-test',",
+      "  external_message_id: 'manual-' + Date.now(),",
+      "  text: 'Hello. Briefly explain how you can help my business.',",
+      "  display_name: 'Operator test',",
+      '  metadata: { source: "n8n-manual-test" }',
+      '} }];',
+    ].join('\n'), [260, 300]),
+    brainHttp(name, [560, 300]),
+  ];
+  const connections = {};
+  connect(connections, 'Run manually', 'Editable test message');
+  connect(connections, 'Editable test message', 'Ask shared AI brain');
+  return workflow(name, nodes, connections);
 }
 
-console.log(`Generated ${artifacts.size} inactive n8n workflow templates.`);
+const workflows = [instagramWorkflow(), whatsappWorkflow(), telegramWorkflow(), ...operatorWorkflows(), internalWorkflow()];
+await fs.rm(outputDirectory, { recursive: true, force: true });
+await fs.mkdir(outputDirectory, { recursive: true });
+for (const item of workflows) {
+  const filename = item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.json';
+  await fs.writeFile(path.join(outputDirectory, filename), JSON.stringify(item, null, 2) + '\n');
+}
+console.log(JSON.stringify({ generated: workflows.length, directory: outputDirectory, names: workflows.map((item) => item.name) }, null, 2));
