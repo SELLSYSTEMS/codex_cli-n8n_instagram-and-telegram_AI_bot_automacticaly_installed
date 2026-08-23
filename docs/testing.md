@@ -59,3 +59,15 @@ node scripts/brain-scenarios.mjs --case decision-ready-support-bot-close
 ```
 
 The harness still exercises the live Brain API and configured model router. The filter changes only which fixture is executed; it does not add response templates or semantic branching to production behavior.
+
+
+## CRM projection checks
+
+CRM tests validate operational correctness, not dialogue semantics:
+
+1. the provider account is reachable;
+2. the local outbox and contact-link tables exist;
+3. repeated source events do not create duplicate CRM contacts;
+4. contact state and associated notes update after a completed turn;
+5. retryable provider errors remain queued and never block a Brain reply;
+6. `npm run crm:status` exposes pending, retry, completed, and dead jobs.

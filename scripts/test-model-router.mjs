@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { canonicalCommercialAction } from './model-router.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -101,22 +102,90 @@ assert.ok(enabledRoutes.length > 0, 'At least one model route must be enabled');
 const isPublicDefault =
   path.relative(rootDir, configPath) === path.join('config', 'model-routes.default.json');
 
-if (isPublicDefault) {
-  assert.deepEqual(
-    enabledRoutes.map(routeLabel),
-    ['codex_cli/gpt-5.3-codex-spark', 'codex_cli/gpt-5.4-mini'],
-    'The public default fallback chain must be Codex Spark, then Codex Mini',
-  );
+  if (isPublicDefault) {
+    assert.deepEqual(
+      enabledRoutes.map(routeLabel),
+      ['codex_cli/gpt-5.6-sol', 'codex_cli/gpt-5.3-codex-spark'],
+      'The public default route chain must be Codex 5.6, then Codex Spark on quota exhaustion',
+    );
 
-  const disabledRoutes = new Set(routes.filter((route) => !route.enabled).map(routeLabel));
-  for (const expected of [
-    'deepseek/deepseek-chat',
-    'openai/gpt-4.1',
-    'deepseek/deepseek-reasoner',
-  ]) {
-    assert.ok(disabledRoutes.has(expected), `${expected} must be available but disabled by default`);
+    assert.equal(enabledRoutes[0].reasoning_effort, 'high', 'Codex 5.6 must use high reasoning');
+    assert.equal(enabledRoutes[1].reasoning_effort, 'low', 'Codex Spark quota fallback must use low reasoning');
+
+    const disabledRoutes = new Set(routes.filter((route) => !route.enabled).map(routeLabel));
+    for (const expected of [
+      'deepseek/deepseek-v4-pro',
+      'deepseek/deepseek-v4-flash',
+      'openai/gpt-4.1',
+      'codex_cli/gpt-5.4-mini',
+    ]) {
+      assert.ok(disabledRoutes.has(expected), `${expected} must be available but disabled by default`);
+    }
   }
+
+const flatCommercialSelection = canonicalCommercialAction(
+  {
+    action_id: 'present_checkout',
+    option_id: 'deposit',
+    grounded_total: 1256,
+    deposit_amount: 439.6,
+    currency: 'USD',
+    authorization_is_explicit: true,
+    authorization_is_unambiguous: true,
+    authorization_evidence:
+      'I accept the quote and want to pay the 35% deposit now.',
+    authorization_scope:
+      'Proof-Driven Landing Build at $1,256, 35% deposit ($439.60) via present_checkout.',
+    grounding_reference: 'Proof-Driven Landing Build: about US$1,256.',
+  },
+  'present_checkout',
+  {},
+);
+
+assert.deepEqual(flatCommercialSelection.arguments, {
+  option_id: 'deposit',
+  grounded_total_usd: 1256,
+  grounding_reference: 'Proof-Driven Landing Build: about US$1,256.',
+  missing_fact: null,
+  customer_commitment: null,
+  authorization_is_explicit: true,
+  authorization_is_unambiguous: true,
+  authorization_evidence:
+    'I accept the quote and want to pay the 35% deposit now.',
+  authorization_scope:
+    'Proof-Driven Landing Build at $1,256, 35% deposit ($439.60) via present_checkout.',
+});
+for (const key of [
+  'option_id',
+  'grounded_total',
+  'deposit_amount',
+  'currency',
+  'authorization_is_explicit',
+]) {
+  assert.equal(
+    Object.hasOwn(flatCommercialSelection, key),
+    false,
+    `Flat commercial field ${key} must be canonicalized into arguments or removed`,
+  );
 }
+
+const nestedCommercialSelection = canonicalCommercialAction(
+  {
+    option_id: 'deposit',
+    authorization_is_explicit: true,
+    arguments: {
+      option_id: 'full',
+      authorization_is_explicit: false,
+    },
+  },
+  'present_checkout',
+  {},
+);
+assert.equal(nestedCommercialSelection.arguments.option_id, 'full');
+assert.equal(
+  nestedCommercialSelection.arguments.authorization_is_explicit,
+  false,
+);
 
 console.log(
   JSON.stringify(

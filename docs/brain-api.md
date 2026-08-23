@@ -17,7 +17,7 @@ The endpoint is idempotent on tenant, channel, and external_message_id.
 
 Response follows schemas/brain-response.schema.json. The adapter sends text only when action is reply and should_reply is true. Action silent means acknowledge the webhook without outbound delivery. Action escalate stores a durable marker and returns one escalation notice at most once.
 
-## POST /v1/escalations/reset
+## POST /v1/admin/escalations/reset
 
 Requires administrator authentication. Input identifies tenant and thread. Reset clears the durable escalation marker and permits the bot to resume on the next inbound message.
 
@@ -36,3 +36,11 @@ The Brain decision includes a required `commercial_next_step` object. It is a st
 The planner may recommend discovery, a solution, a commitment, payment, human handoff, or no commercial action. Payment fields remain nullable and may only be populated from tenant-private policy plus grounded price data. The reply must express the selected step naturally; external side effects still require a separately executed `commercial_action`.
 
 Public installations provide their own private commercial policy and knowledge. The public schema contains no tenant price, domain, payment method, or company-specific wording.
+
+## Configuration ownership
+
+- Brain API owns model routing, conversation semantics, memory, RAG, escalation and commercial decisions.
+- n8n owns channel receipt and delivery only.
+- Source registry: `config/source-of-truth.default.json`.
+- Runtime model evidence: `GET /health`.
+- Installed private overrides remain ignored and are never copied into the public template.

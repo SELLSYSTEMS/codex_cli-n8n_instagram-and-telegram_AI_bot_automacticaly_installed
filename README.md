@@ -1,6 +1,6 @@
-# Multichannel AI Bot Autoinstall Template
+# Reusable Multichannel AI Chat Template
 
-A public, company-neutral blueprint for building a production-oriented conversational AI bot across Instagram, Telegram, WhatsApp, and future channels.
+A public, company-neutral blueprint for installing a production-oriented multichannel AI chat system across Instagram, Telegram, WhatsApp, and future channels.
 
 The repository separates the durable bot brain from delivery infrastructure:
 
@@ -10,7 +10,9 @@ The repository separates the durable bot brain from delivery infrastructure:
                                       -> structured action
     Channel <- thin adapter <---------+
 
-n8n is the included replaceable orchestration shell, not the application core. A future installer may replace n8n without changing the Brain API, storage model, test corpus, or conversation policy.
+n8n is the included replaceable orchestration shell, not the application core. It may be replaced without changing the Brain API, storage model, test corpus, or conversation policy.
+
+The reusable artifact is the chat platform itself: installer agents consume its contracts, while each deployed bot receives private tenant data and policy outside this repository.
 
 ## Defaults
 
@@ -52,3 +54,8 @@ No real credentials or company knowledge belong in this repository.
 - Run `npm run langfuse:up` to start the local, loopback-only Langfuse stack.
 - Run `npm run instagram:webhook:configure` to idempotently configure and verify an Instagram Login webhook from private environment values.
 - See `docs/langfuse.md` and `docs/instagram-delivery-diagnostics.md`.
+
+
+## Optional CRM projection
+
+HubSpot can be enabled as a replaceable operator-facing projection without moving memory or reasoning out of the Brain. It provides deduplicated contacts, current conversational state, and associated conversation checkpoint notes through a durable local outbox. See [docs/crm-integration.md](docs/crm-integration.md).

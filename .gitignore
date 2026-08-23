@@ -20,3 +20,12 @@ coverage/
 *.debug
 .DS_Store
 deploy/langfuse/data/
+
+.state/
+logs/
+# Repository-root runtime and agent transients belong under .runtime/ or .private/archives/.
+/.codex-backups/
+/.codex-timers/
+/*.bak
+/*.orig
+/*.tmp

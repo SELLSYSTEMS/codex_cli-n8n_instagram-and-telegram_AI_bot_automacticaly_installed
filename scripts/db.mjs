@@ -1,5 +1,10 @@
 import pg from 'pg';
 import { embedPassages, embedQuery, vectorLiteral } from './embeddings.mjs';
+import {
+  appendConversationEvidence,
+  compactCommercialAction,
+  deriveSemanticState,
+} from './semantic-state.mjs';
 
 const { Pool } = pg;
 const connectionString = process.env.LOCAL_POSTGRES_URL;
@@ -131,7 +136,7 @@ export async function beginTurn(request) {
 
     const historyResult = await client.query(
       "select channel, direction, role, content, created_at from agent.messages where conversation_id = $1 and id <> $2 order by created_at desc limit $3",
-      [conversation.id, inboundResult.rows[0].id, Number(process.env.BRAIN_HISTORY_LIMIT || 30)]
+    [conversation.id, inboundResult.rows[0].id, Number(process.env.BRAIN_HISTORY_LIMIT || 12)]
     );
 
     const contactResult = await client.query(
@@ -151,6 +156,27 @@ export async function beginTurn(request) {
   });
 }
 
+export async function getActiveCommercialRequests(tenantId, conversationId) {
+  const result = await pool.query(
+    `select
+       id,
+       action_id,
+       status,
+       customer_commitment,
+       context,
+       test_only,
+       requested_at,
+       updated_at
+     from agent.commercial_requests
+     where tenant_id = $1
+       and conversation_id = $2
+       and status in ('requested', 'preparing', 'ready')
+     order by updated_at desc`,
+    [tenantId, conversationId],
+  );
+  return result.rows;
+}
+
 export async function retrieveKnowledge(tenantId, queryText, limit = 8) {
   const query = cleanText(queryText, 12000);
   if (!query) return [];
@@ -160,6 +186,49 @@ export async function retrieveKnowledge(tenantId, queryText, limit = 8) {
     [tenantId, embedding, query, Number(limit)]
   );
   return result.rows;
+}
+
+function hasMeaningfulProfileValue(value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return Boolean(value.trim());
+  if (Array.isArray(value)) return value.some(hasMeaningfulProfileValue);
+  if (typeof value === "object") return Object.values(value).some(hasMeaningfulProfileValue);
+  return true;
+}
+
+function mergeProfileValue(current, incoming) {
+  if (!hasMeaningfulProfileValue(incoming)) return current;
+  if (Array.isArray(incoming)) {
+    const merged = [...(Array.isArray(current) ? current : []), ...incoming]
+      .filter(hasMeaningfulProfileValue);
+    const seen = new Set();
+    return merged.filter((item) => {
+      const key = typeof item === "object"
+        ? JSON.stringify(item)
+        : `${typeof item}:${String(item)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  if (typeof incoming === "object") {
+    const currentObject = current && typeof current === "object" && !Array.isArray(current)
+      ? current
+      : {};
+    return Object.fromEntries(
+      [...new Set([...Object.keys(currentObject), ...Object.keys(incoming)])]
+        .map((key) => [key, mergeProfileValue(currentObject[key], incoming[key])])
+        .filter(([, value]) => hasMeaningfulProfileValue(value)),
+    );
+  }
+  return typeof incoming === "string" ? incoming.trim() : incoming;
+}
+
+function mergeContactProfile(current, incoming) {
+  return mergeProfileValue(
+    current && typeof current === "object" && !Array.isArray(current) ? current : {},
+    incoming && typeof incoming === "object" && !Array.isArray(incoming) ? incoming : {},
+  );
 }
 
 export async function finishTurn(turn, decision, modelRun) {
@@ -174,26 +243,59 @@ export async function finishTurn(turn, decision, modelRun) {
         .filter(Boolean)
         .slice(0, 50)
     : [];
+  const priorSemanticState = cleanObject(turn.conversation?.semantic_state);
+  const latestUserMessage = cleanText(
+    turn.inboundMessage?.content
+      || turn.inboundMessage?.text
+      || turn.request?.text
+      || turn.inbound?.content
+      || turn.inbound?.text
+      || turn.message?.content
+      || turn.message?.text
+      || turn.content
+      || turn.text,
+    8000,
+  );
+  const recentEvidence = appendConversationEvidence(priorSemanticState, {
+    userText: latestUserMessage,
+    assistantReply: reply,
+    decision: {
+      ...decision,
+      confirmed_commitments: confirmedCommitments,
+      solution_scope: solutionScope,
+    },
+  });
   const semanticState = {
-    ...cleanObject(decision.semanticState || decision.semantic_state),
-    intent: cleanText(decision.intent, 500),
-    conversation_phase: cleanText(decision.conversationPhase || decision.conversation_phase, 500),
-    customer_readiness: cleanText(decision.customerReadiness || decision.customer_readiness, 500),
-    material_blocker: cleanText(decision.materialBlocker || decision.material_blocker, 1500) || null,
-    next_best_action: cleanText(decision.nextBestAction || decision.next_best_action, 1500),
-    commercial_progress: cleanText(decision.commercialProgress || decision.commercial_progress, 1500),
-    decision_status: cleanText(decision.decisionStatus || decision.decision_status, 200),
-    confirmed_commitments: confirmedCommitments,
-    pending_customer_commitment:
-      cleanText(decision.pendingCustomerCommitment || decision.pending_customer_commitment, 1500) || null,
-    solution_scope: solutionScope,
-    commercial_action: cleanObject(decision.commercialAction || decision.commercial_action),
+    ...deriveSemanticState({
+      ...decision,
+      confirmed_commitments: confirmedCommitments,
+      solution_scope: solutionScope,
+    }, priorSemanticState),
+    recent_evidence: recentEvidence,
+    last_user_message: latestUserMessage || priorSemanticState.last_user_message || '',
+    last_assistant_reply: reply || priorSemanticState.last_assistant_reply || '',
+    commercial_action: compactCommercialAction(
+      decision.commercialAction || decision.commercial_action,
+    ),
+    commercial_next_step:
+      decision.commercialNextStep ||
+      decision.commercial_next_step ||
+      priorSemanticState.commercial_next_step ||
+      null,
     last_confidence: decision.confidence ?? null,
     last_action: action,
   };
-  const profilePatch = cleanObject(
-    decision.contactProfilePatch || decision.contact_profile_patch || decision.contact_profile
-  );
+      const decisionProfilePatch = cleanObject(
+        decision.contactProfilePatch || decision.contact_profile_patch || decision.contact_profile
+      );
+      const semanticContactProfile = cleanObject(
+        semanticState.contact_profile || semanticState.conversation_state?.contact_profile
+      );
+      const profilePatch = mergeContactProfile(
+        semanticContactProfile,
+        decisionProfilePatch
+      );
+      semanticState.contact_profile = profilePatch;
   const escalationReason = cleanText(decision.escalationReason || decision.escalation_reason, 2000);
 
   if (decision.should_reply !== false && !reply) throw new Error('The model returned an empty reply');
@@ -216,9 +318,18 @@ export async function finishTurn(turn, decision, modelRun) {
       outboundMessage = outboundResult.rows[0];
     }
 
+    const currentContact = await client.query(
+      "select profile from agent.contacts where id = $1 for update",
+      [turn.identity.contact_id]
+    );
+    const mergedProfile = mergeContactProfile(
+      currentContact.rows[0]?.profile || {},
+      profilePatch
+    );
+    const displayName = mergedProfile.name || mergedProfile.full_name || null;
     await client.query(
-      "update agent.contacts set profile = profile || $2::jsonb where id = $1",
-      [turn.identity.contact_id, JSON.stringify(profilePatch)]
+      "update agent.contacts set profile = $2::jsonb, display_name = coalesce($3, display_name) where id = $1",
+      [turn.identity.contact_id, JSON.stringify(mergedProfile), displayName]
     );
 
     const conversationResult = await client.query(
@@ -350,11 +461,26 @@ export async function linkIdentities(input) {
 
     const duplicateContactIds = [...new Set([source.contact_id, target.contact_id])].filter((id) => id !== canonicalContactId);
     for (const duplicateId of duplicateContactIds) {
-      const duplicateProfile = await client.query("select profile from agent.contacts where id = $1", [duplicateId]);
+      const duplicateProfile = await client.query(
+        "select profile from agent.contacts where id = $1 for update",
+        [duplicateId]
+      );
       if (duplicateProfile.rowCount) {
+        const canonicalProfile = await client.query(
+          "select profile from agent.contacts where id = $1 for update",
+          [canonicalContactId]
+        );
+        const mergedProfile = mergeContactProfile(
+          duplicateProfile.rows[0].profile || {},
+          canonicalProfile.rows[0]?.profile || {}
+        );
         await client.query(
-          "update agent.contacts set profile = profile || $2::jsonb where id = $1",
-          [canonicalContactId, JSON.stringify(duplicateProfile.rows[0].profile || {})]
+          "update agent.contacts set profile = $2::jsonb, display_name = coalesce($3, display_name) where id = $1",
+          [
+            canonicalContactId,
+            JSON.stringify(mergedProfile),
+            mergedProfile.name || mergedProfile.full_name || null
+          ]
         );
       }
       await client.query("update agent.identities set contact_id = $1 where contact_id = $2", [canonicalContactId, duplicateId]);

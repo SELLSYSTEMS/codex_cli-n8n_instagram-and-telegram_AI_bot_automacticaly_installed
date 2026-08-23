@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "publicTemplate": {
+    "classification": "public-generic",
+    "sourceOfTruthDirectories": [
+      "config",
+      "docs",
+      "schemas",
+      "scripts",
+      "src",
+      "tests",
+      "workflows"
+    ]
+  },
+  "tenantPrivate": {
+    "root": ".private",
+    "classification": "private-local-ignored",
+    "active": ".private/active",
+    "operations": ".private/operations",
+    "archives": ".private/archives",
+    "pointers": ".private/pointers"
+  },
+  "runtime": {
+    "root": ".runtime",
+    "classification": "generated-local-ignored",
+    "allowedContent": [
+      "cache",
+      "downloaded-models",
+      "logs",
+      "pids",
+      "provider-state",
+      "test-results",
+      "traces"
+    ]
+  },
+  "compatibility": {
+    "aliasesRequireRegistry": true,
+    "retirementRequiresRestartAndSmokeTests": true
+  },
+  "forbiddenTopLevelRuntimeDirectories": [
+    ".state",
+    "logs"
+  ]
+}

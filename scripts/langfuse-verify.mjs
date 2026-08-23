@@ -154,7 +154,7 @@ async function inspectTrace(traceId) {
 
 async function candidateIds() {
   if (fixedTraceId) return [fixedTraceId];
-  const payload = await request('/api/public/traces?limit=50&orderBy=timestamp.desc');
+  const payload = await request('/api/public/traces?limit=100');
   return rows(payload)
     .filter((trace) => trace?.id && (!trace?.name || trace.name === 'brain.message'))
     .map((trace) => trace.id);

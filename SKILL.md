@@ -33,3 +33,8 @@ If Supabase is not explicitly requested, use local PostgreSQL.
 ## Behavioral invariant
 
 Use the LLM for semantic interpretation and response strategy. Use deterministic code only for operational correctness: authentication, validation, tenancy, idempotency, persistence, rate limits, tool permissions, model fallback, escalation state, and delivery.
+
+
+## Optional CRM adapter
+
+When the operator requests a CRM, keep it behind the Brain projection boundary. For HubSpot, configure the ignored local environment, apply the local schema, run `npm run crm:setup`, verify with `npm run crm:verify`, and backfill only after verification. Never place a CRM token, portal identifier, production contact export, or tenant-specific field value in this public template.

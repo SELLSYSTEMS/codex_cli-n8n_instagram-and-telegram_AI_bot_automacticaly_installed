@@ -32,3 +32,8 @@ Routes are ordered by numeric priority. Disabled routes are never called. Quota 
 ## Data boundary
 
 Public code contains contracts and synthetic examples only. Tenant prompts, knowledge, credentials, production IDs, user data, evaluations, and runtime route overrides stay private.
+
+
+## CRM projection boundary
+
+CRM systems are downstream projections, never sources of conversational truth. The Brain commits the turn to local PostgreSQL and then writes an idempotent event to `agent.crm_sync_outbox`. A provider adapter synchronizes operator-facing contact state and conversation notes asynchronously. CRM latency or failure therefore cannot block a channel response, and HubSpot can be replaced without changing prompts, memory, tools, or channel workflows.

@@ -64,6 +64,32 @@ for (const file of files) {
   inspectStrings(document, '$', file);
 }
 
+const brainPrompt = readFileSync(`${process.cwd()}/prompts/brain-system.md`, 'utf8');
+const brainGraphSource = readFileSync(`${process.cwd()}/scripts/brain-graph.mjs`, 'utf8');
+const decisionSchema = JSON.parse(readFileSync(`${process.cwd()}/schemas/brain-decision.schema.json`, 'utf8'));
+const hubspotSource = readFileSync(`${process.cwd()}/scripts/crm-hubspot.mjs`, 'utf8');
+
+for (const requiredSignal of ['English is the default language', 'If language preference is uncertain, use English', 'Never implement or imitate language-specific keyword trees', 'preferred future contact channel']) {
+  if (!brainPrompt.includes(requiredSignal)) failures.push(`brain-system.md is missing policy signal: ${requiredSignal}`);
+}
+
+const forbiddenLanguageRouting = [
+  /if\s*\([^)]*(?:language|locale)[^)]*\)/i,
+  /switch\s*\([^)]*(?:language|locale)/i,
+  /(?:language|locale)\s*={2,3}\s*['"]/i,
+];
+for (const pattern of forbiddenLanguageRouting) {
+  if (pattern.test(brainGraphSource)) failures.push(`brain-graph.mjs contains forbidden deterministic language routing: ${pattern}`);
+}
+
+const profileSchema = decisionSchema.properties?.contact_profile;
+for (const field of ['preferred_contact_channel', 'preferred_contact_time', 'timezone']) {
+  if (!profileSchema?.properties?.[field] || !profileSchema.required?.includes(field)) failures.push(`brain decision schema is missing required contact profile field: ${field}`);
+}
+for (const field of ['brain_contact_language', 'brain_preferred_channel', 'brain_preferred_contact_time', 'brain_contact_timezone']) {
+  if (!hubspotSource.includes(field)) failures.push(`HubSpot projection is missing field: ${field}`);
+}
+
 if (failures.length > 0) {
   console.error('English-only test policy failed:');
   failures.forEach((failure) => console.error(`- ${failure}`));

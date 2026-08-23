@@ -46,7 +46,7 @@ function chunksFrom(text, size, overlap) {
   return chunks;
 }
 
-const manifestPath = path.resolve(repositoryRoot, argumentValue('--manifest') || process.env.KNOWLEDGE_MANIFEST_PATH || '.private/knowledge-manifest.json');
+const manifestPath = path.resolve(repositoryRoot, argumentValue('--manifest') || process.env.KNOWLEDGE_MANIFEST_PATH || '.private/active/knowledge/knowledge-manifest.json');
 if (!fs.existsSync(manifestPath)) throw new Error(`Knowledge manifest not found: ${manifestPath}`);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 if (!Array.isArray(manifest.sources) || manifest.sources.length === 0) throw new Error('Knowledge manifest must contain sources');

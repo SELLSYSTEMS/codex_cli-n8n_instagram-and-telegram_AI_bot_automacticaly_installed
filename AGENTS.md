@@ -14,6 +14,15 @@ This public repository is a generic, reusable installation template for a multic
 - Let the language model reason semantically. Do not encode language, intent, sales dialogue, objection handling, or escalation decisions as brittle keyword trees.
 - Operational checks for authentication, schema validation, idempotency, rate limits, delivery, and action dispatch are required.
 
+## Canonical ownership and layout
+
+- Public repository directories contain generic source code, contracts, migrations, workflow templates, tests, and documentation only.
+- Tenant-private mutable material belongs under .private/active, operational records under .private/operations, immutable snapshots under .private/archives, and latest-snapshot pointers under .private/pointers.
+- Generated process state, caches, downloaded models, logs, PIDs, traces, and test results belong under .runtime only.
+- The canonical application database namespace is agent. Legacy public.bot_* objects are read-only quarantine data until backup, reconciliation, and explicit operator-approved retirement.
+- Every new table, file, workflow, runtime override, and external integration must declare an owner, data classification, source of truth, lifecycle, and retirement rule.
+- Compatibility aliases are temporary migration aids. Record every alias and remove it only after service restart and smoke-test evidence.
+
 ## Public-template safety
 
 - Never commit credentials, tokens, private customer data, company knowledge, production IDs, private domains, or production exports.

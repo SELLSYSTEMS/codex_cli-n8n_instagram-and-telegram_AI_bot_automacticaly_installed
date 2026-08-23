@@ -130,12 +130,29 @@ export function runtimeScoreDefinitions(result) {
   const escalation = result?.escalation ?? result?.state?.escalation ?? result?.conversation?.escalation;
   const memory = result?.memory ?? result?.state ?? result?.conversation ?? result?.thread;
   const commercial = result?.commercialAction ?? result?.commercial_action ?? result?.action;
+  const decisionSelection = result?.decision?.commercial_action
+    ?? result?.decision?.commercialAction
+    ?? null;
+  const semanticConformance = result?.semanticConformance
+    ?? result?.semantic_conformance
+    ?? result?.model?.semanticConformance
+    ?? result?.model?.semantic_conformance
+    ?? null;
+  const selectedCommercialAction = Boolean(
+    decisionSelection?.action_id
+    ?? decisionSelection?.actionId
+    ?? commercial?.selection?.action_id
+    ?? commercial?.selection?.actionId,
+  );
+  const commercialActionValid = selectedCommercialAction
+    ? commercial?.valid === true
+    : semanticConformance?.performed === true && semanticConformance?.passed === true;
   return [
     ['response_contract_valid', silent || hasReply, 'A model reply or an explicit no-reply action is present.'],
     ['reply_policy_consistent', silent ? !hasOutbound : hasReply, 'A no-reply turn emits no outbound message; a reply turn contains model output.'],
     ['memory_state_returned', Boolean(memory), 'The Brain returned persistent conversation state.'],
     ['model_route_recorded', silent || Boolean(routeName(result)), 'A model route is recorded whenever model inference is required.'],
-    ['commercial_action_valid', commercial === undefined || commercial === null || typeof commercial === 'string' || typeof commercial === 'object', 'Commercial action has a machine-readable contract.'],
+    ['commercial_action_valid', commercialActionValid, 'Commercial action selection and dispatch match the semantically audited turn.'],
     ['escalation_policy_consistent', !escalation || typeof escalation === 'boolean' || typeof escalation === 'string' || typeof escalation === 'object', 'Escalation state has a valid contract.'],
   ].map(([name, value, comment]) => ({ name, value: value ? 1 : 0, dataType: 'BOOLEAN', comment }));
 }

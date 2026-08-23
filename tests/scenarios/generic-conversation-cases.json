@@ -144,10 +144,10 @@
       "That approach works for us. Let us move forward.",
       "That approach works for us. Let us move forward."
     ],
-    "persona": "A concise Russian-speaking buyer who wants a website support chatbot with Telegram human handoff and sales-closing capability.",
+    "persona": "A concise English-speaking buyer who wants a WhatsApp assistant that answers product questions, qualifies leads, and progresses decisively once the scope is accepted.",
     "success_criteria": [
       "The final answer is not a bare acknowledgement or paraphrase.",
-      "The assistant retains the agreed website support, sales, and Telegram handoff scope.",
+      "The assistant retains the agreed WhatsApp product-answering and lead-qualification scope.",
       "The assistant advances to one concrete proposal, scoping, or implementation next step.",
       "The assistant does not interpret the final confirmation as authorization to invent a price or execute a purchase.",
       "The wording is natural and generated from context rather than a canned sales template.",
@@ -163,12 +163,12 @@
       "We need automation for customer conversations and follow-up.",
       "Yes."
     ],
-    "persona": "A concise buyer whose final phrase can plausibly mean closing sales or closing support cases.",
+    "persona": "A concise English-speaking buyer whose short assent may refer to more than one outcome proposed by the assistant.",
     "success_criteria": [
-      "The assistant preserves the website support and Telegram handoff scope.",
-      "It recognizes that the new capability is materially ambiguous and asks one concise meaning-level clarification instead of silently choosing ticket closure or sales closing.",
-      "It explains the practical consequence of the two interpretations and continues toward a scoped solution.",
-      "It does not request FAQs, scripts, payment, checkout, or a deposit."
+      "The assistant resolves what the short assent refers to before treating any outcome as selected.",
+      "It asks one concise referent question without replaying the prior menu verbatim.",
+      "It does not infer transaction authorization, add unsupported scope, or substitute a new offer.",
+      "It does not request payment, checkout, or a deposit."
     ],
     "language": "en"
   },

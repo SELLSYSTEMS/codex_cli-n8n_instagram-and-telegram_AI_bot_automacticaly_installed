@@ -3,13 +3,37 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { loadEnv, requiredEnv, brainHeaders, jsonRequest, assert } from './runtime-env.mjs';
 
+const args = process.argv.slice(2);
+
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(`Usage: node scripts/brain-scenarios.mjs [--file <path>] [--case <id>]
+
+Options:
+  --file <path>  Scenario JSON file (default: tests/scenarios/generic-conversation-cases.json)
+  --case <id>    Run one exact scenario id
+  -h, --help     Show this help without loading runtime configuration`);
+  process.exit(0);
+}
+
+for (let index = 0; index < args.length; index += 1) {
+  const option = args[index];
+  if (option === '--file' || option === '--case') {
+    if (!args[index + 1] || args[index + 1].startsWith('--')) {
+      throw new Error(`Missing value for ${option}`);
+    }
+    index += 1;
+    continue;
+  }
+  throw new Error(`Unknown option: ${option}`);
+}
+
 loadEnv();
 requiredEnv(['BRAIN_API_URL', 'BRAIN_API_TOKEN', 'BRAIN_ADMIN_TOKEN', 'BRAIN_TENANT_KEY']);
 const base = process.env.BRAIN_API_URL.replace(/\/$/, '');
-const fileOptionIndex = process.argv.indexOf('--file');
-const requestedScenarioFile = fileOptionIndex >= 0 ? process.argv[fileOptionIndex + 1] : null;
-const caseOptionIndex = process.argv.indexOf('--case');
-const requestedCaseId = caseOptionIndex >= 0 ? process.argv[caseOptionIndex + 1] : null;
+const fileOptionIndex = args.indexOf('--file');
+const requestedScenarioFile = fileOptionIndex >= 0 ? args[fileOptionIndex + 1] : null;
+const caseOptionIndex = args.indexOf('--case');
+const requestedCaseId = caseOptionIndex >= 0 ? args[caseOptionIndex + 1] : null;
 
 if (fileOptionIndex >= 0 && (!requestedScenarioFile || requestedScenarioFile.startsWith('--'))) {
   throw new Error('--file requires a scenario JSON path');
@@ -171,7 +195,10 @@ async function runOpenAiCompatibleJudge(prompt, outputPath, route) {
   }
   const endpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(route.timeout_ms ?? 120000));
+  const timeout = setTimeout(
+    () => controller.abort(),
+    Math.max(Number(route.timeout_ms ?? 120000), 180000),
+  );
   let response;
   try {
     response = await fetch(endpoint, {
@@ -184,6 +211,7 @@ async function runOpenAiCompatibleJudge(prompt, outputPath, route) {
       body: JSON.stringify({
         model: route.model,
         temperature: 0,
+        max_tokens: 8192,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: 'Evaluate strictly and return only the requested JSON object.' },
@@ -198,7 +226,14 @@ async function runOpenAiCompatibleJudge(prompt, outputPath, route) {
   if (!response.ok) {
     throw new Error(`Scenario judge HTTP ${response.status}: ${JSON.stringify(payload).slice(-1200)}`);
   }
-  const judged = extractJudgeJson(payload?.choices?.[0]?.message?.content);
+  const choice = payload?.choices?.[0];
+  const content = choice?.message?.content;
+  if (!String(content ?? '').trim()) {
+    throw new Error(
+      `Scenario judge returned empty content (finish_reason=${choice?.finish_reason ?? 'unknown'})`,
+    );
+  }
+  const judged = extractJudgeJson(content);
   await fs.writeFile(outputPath, JSON.stringify(judged), { mode: 0o600 });
   return { stdout: '', stderr: '' };
 }
@@ -217,20 +252,31 @@ async function runJudge(prompt, outputPath) {
   const attempts = [];
 
   for (const route of candidates) {
-    await fs.rm(outputPath, { force: true });
-    try {
-      const result = route.provider === 'codex_cli'
-        ? await runCodexJudge(prompt, outputPath, route)
-        : await runOpenAiCompatibleJudge(prompt, outputPath, route);
-      console.log(`Scenario judge model: ${route.model} (${route.id})`);
-      return {
-        ...result,
-        route: { id: route.id, provider: route.provider, model: route.model },
-        attempts,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      attempts.push({ id: route.id, provider: route.provider, model: route.model, error: message.slice(-300) });
+    for (let retry = 1; retry <= 3; retry += 1) {
+      await fs.rm(outputPath, { force: true });
+      try {
+        const result = route.provider === 'codex_cli'
+          ? await runCodexJudge(prompt, outputPath, route)
+          : await runOpenAiCompatibleJudge(prompt, outputPath, route);
+        console.log(`Scenario judge model: ${route.model} (${route.id})`);
+        return {
+          ...result,
+          route: { id: route.id, provider: route.provider, model: route.model },
+          attempts,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        attempts.push({
+          id: route.id,
+          provider: route.provider,
+          model: route.model,
+          retry,
+          error: message.slice(-300),
+        });
+        if (retry < 3) {
+          await new Promise((resolve) => setTimeout(resolve, retry * 1000));
+        }
+      }
     }
   }
 

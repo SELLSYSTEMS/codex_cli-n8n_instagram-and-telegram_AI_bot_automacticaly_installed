@@ -272,8 +272,13 @@ if (enabled && globalThis.fetch && !globalThis[fetchMarker]) {
       const startedAt = Date.now();
       try {
         const response = await nativeFetch(url, init);
+        const rawBody = await response.arrayBuffer();
         let data;
-        try { data = await response.clone().json(); } catch { data = null; }
+        try {
+          data = JSON.parse(new TextDecoder().decode(rawBody));
+        } catch {
+          data = null;
+        }
         const usage = usageFrom(request.provider, data?.usage);
         const cost = request.provider === 'deepseek' ? deepseekCost(model, usage) : undefined;
         span.setAttributes(observationAttributes({
@@ -300,7 +305,12 @@ if (enabled && globalThis.fetch && !globalThis[fetchMarker]) {
         span.setAttribute('http.response.status_code', response.status);
         span.setAttribute('app.latency_ms', Date.now() - startedAt);
         span.setStatus({ code: response.ok ? SpanStatusCode.OK : SpanStatusCode.ERROR });
-        return response;
+        const bodyAllowed = ![204, 205, 304].includes(response.status);
+        return new Response(bodyAllowed && rawBody.byteLength ? rawBody : null, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        });
       } catch (error) {
         span.recordException(error);
         span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });

@@ -80,16 +80,16 @@ await ensureScoreConfig({
 });
 
 await ensureModel({
-  modelName: 'deepseek-chat-current',
-  matchPattern: '^(deepseek-chat)$',
+  modelName: 'deepseek-v4-flash-current',
+  matchPattern: '^(deepseek-v4-flash)$',
   unit: 'TOKENS',
   inputPrice: 0.00000027,
   outputPrice: 0.00000110,
   startDate: '2026-01-01T00:00:00.000Z',
 });
 await ensureModel({
-  modelName: 'deepseek-reasoner-current',
-  matchPattern: '^(deepseek-reasoner)$',
+  modelName: 'deepseek-v4-pro-current',
+  matchPattern: '^(deepseek-v4-pro)$',
   unit: 'TOKENS',
   inputPrice: 0.00000055,
   outputPrice: 0.00000219,
@@ -101,5 +101,5 @@ console.log(JSON.stringify({
   dataset: dataset.name,
   datasetItems: cases.length,
   scoreConfigs: booleanScores.length + 1,
-  models: ['deepseek-chat', 'deepseek-reasoner'],
+  models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
 }, null, 2));

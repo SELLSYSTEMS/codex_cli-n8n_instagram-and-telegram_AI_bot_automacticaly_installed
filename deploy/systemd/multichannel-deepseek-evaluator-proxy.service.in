@@ -1,0 +1,23 @@
+[Unit]
+Description=Multichannel Brain DeepSeek evaluator compatibility proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=__INSTALL_DIR__
+Environment=NODE_ENV=production
+ExecStart=__INSTALL_DIR__/scripts/start-deepseek-evaluator-proxy.sh run
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

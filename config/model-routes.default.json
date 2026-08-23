@@ -3,44 +3,59 @@
   "reasoning_effort": "low",
   "routes": [
     {
-      "id": "codex_spark",
+      "id": "openai_api",
+      "provider": "openai",
+      "enabled": false,
+      "priority": 30,
+      "model": "gpt-4.1",
+      "supports_reasoning": false,
+      "purpose": "primary OpenAI API route",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "codex_gpt_5_6_sol",
       "provider": "codex_cli",
       "enabled": true,
       "priority": 10,
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "purpose": "Primary Codex CLI conversation route"
+    },
+    {
+      "id": "codex_spark",
+      "provider": "codex_cli",
+      "enabled": true,
+      "priority": 20,
       "model": "gpt-5.3-codex-spark",
-      "purpose": "primary credential-free Codex CLI route"
+      "reasoning_effort": "low",
+      "purpose": "Secondary Codex CLI route used only when the primary route is unavailable or quota-limited"
+    },
+    {
+      "id": "deepseek_v4_pro",
+      "provider": "deepseek",
+      "enabled": false,
+      "priority": 40,
+      "model": "deepseek-v4-pro",
+      "reasoning_effort": "high",
+      "purpose": "disabled API route"
     },
     {
       "id": "codex_mini",
       "provider": "codex_cli",
-      "enabled": true,
-      "priority": 20,
-      "model": "gpt-5.4-mini",
-      "purpose": "Codex CLI quota fallback"
-    },
-    {
-      "id": "deepseek_flash",
-      "provider": "deepseek",
-      "enabled": false,
-      "priority": 30,
-      "model": "deepseek-chat",
-      "purpose": "optional economical API fallback"
-    },
-    {
-      "id": "openai_api",
-      "provider": "openai",
-      "enabled": false,
-      "priority": 40,
-      "model": "gpt-4.1",
-      "purpose": "optional OpenAI API fallback"
-    },
-    {
-      "id": "deepseek_reasoner",
-      "provider": "deepseek",
       "enabled": false,
       "priority": 50,
-      "model": "deepseek-reasoner",
-      "purpose": "optional quality reasoning API route"
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "purpose": "disabled optional Codex CLI route"
+    },
+    {
+      "id": "deepseek_v4_flash",
+      "provider": "deepseek",
+      "enabled": false,
+      "priority": 60,
+      "model": "deepseek-v4-flash",
+      "reasoning_effort": "low",
+      "purpose": "disabled economical API route"
     }
   ]
 }

@@ -1,0 +1,23 @@
+[Unit]
+Description=Multichannel conversational Brain API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@@RUN_USER@@
+Group=@@RUN_GROUP@@
+WorkingDirectory=@@ROOT_DIR@@
+Environment=NODE_ENV=production
+ExecStart=@@ROOT_DIR@@/scripts/start-local-brain-service.sh run
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

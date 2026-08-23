@@ -36,3 +36,15 @@ Channel-specific variables:
 - WhatsApp app, verify, access-token, phone-number, and Graph base variables.
 
 Use n8n credentials or a secrets manager where supported. Never expose a secret through an Edit Fields node, sticky note, export, execution payload, or Git history.
+
+
+## Optional CRM provider
+
+Keep these values only in the local ignored `.env` file:
+
+- `CRM_SYNC_ENABLED`: enables the projection worker.
+- `CRM_PROVIDER`: `hubspot` or `none`.
+- `HUBSPOT_ACCESS_TOKEN`: private-app token; never publish it.
+- `HUBSPOT_API_BASE_URL`: normally `https://api.hubapi.com`.
+- `HUBSPOT_CREATE_NOTES`: controls associated conversation checkpoint notes.
+- `HUBSPOT_NOTE_TO_CONTACT_ASSOCIATION_TYPE_ID`: defaults to the HubSpot-defined note-to-contact association.

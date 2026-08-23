@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "selection_mode": "language_model_semantic_reasoning",
+  "selection_mode": "external_side_effects_only",
   "instructions": {
-    "purpose": "Expose validated commercial next actions to the conversational model without scripting the dialogue.",
-    "natural_language_only": true,
-    "response_templates_forbidden": true,
+    "purpose": "Expose only real external side effects as model-selectable tools.",
+    "semantic_reasoning_owner": "The language model owns conversation, discovery, recommendations, objection handling, sales progression, profile reasoning, and escalation reasoning.",
+    "tool_boundary": "Never represent a dialogue act, planning artifact, question, recommendation, or internal state transition as a commercial action.",
+    "authorization": "Keep commercial_action unselected unless the newest customer message explicitly and unambiguously authorizes an enabled grounded external action and exact option.",
     "keyword_routing_forbidden": true,
-    "invented_amounts_forbidden": true
+    "response_templates_forbidden": true
   },
   "checkout": {
     "provider_name": null,
@@ -18,6 +19,7 @@
     "payment_methods": [],
     "post_payment_process": null
   },
+  "offers": [],
   "payment_options": [
     {
       "id": "deposit",
@@ -34,36 +36,39 @@
   ],
   "actions": [
     {
-      "id": "request_required_fact",
+      "id": "request_custom_proposal",
       "enabled": true,
-      "objective": "Ask for exactly one unresolved fact only when its answer materially changes the recommendation, architecture, scope, estimate, delivery risk, or next executable action. Supply a concise semantic rationale from the conversation, durable state, or authoritative knowledge; a literal source quotation is not required.",
+      "exposes_checkout": false,
+      "objective": "Persist an internal seller-owned custom proposal request when the customer is decision-ready, the service scope is sufficiently understood, and no exact executable fixed offer matches.",
+      "requires_customer_commitment": true,
+      "requires_catalog_offer": false,
       "requires_grounded_total": false,
       "requires_payment_option": false,
-      "requires_grounded_missing_fact": true,
       "allows_missing_fact": true,
-      "allowed_payment_options": []
-    },
-    {
-      "id": "request_payment_choice",
-      "enabled": false,
-      "objective": "When an exact total is grounded and the customer is ready, let the customer choose among the enabled payment options.",
-      "requires_grounded_total": true,
-      "requires_payment_option": false,
-      "allowed_payment_options": [
-        "deposit",
-        "full_payment"
-      ],
-      "requires_explicit_authorization": true,
-      "authorization_source": "newest_inbound_message",
-      "requires_unambiguous_exact_option": true,
-      "on_missing_authorization": "continue_conversation"
+      "semantic_selection_contract": {
+        "select_when": "The customer has clearly committed to proceed or explicitly requests the proposal, agreement, invoice, or exact next commercial step; enough scope is known to let the seller prepare it; and no exact executable fixed offer applies.",
+        "do_not_select_when": "The customer is still exploring, material scope is unresolved, an exact executable fixed offer applies, or the request is unrelated.",
+        "customer_commitment_requirement": "Copy a short evidence phrase from the current customer message that shows readiness to proceed.",
+        "seller_owned": true
+      },
+      "response_contract": {
+        "render_in_current_reply": true,
+        "next_step": "Respond specifically to this buyer and confirmed scope. Briefly recap the concrete outcome they accepted, state the next seller-owned deliverable needed to move the purchase forward, and do not repeat qualification questions already answered. Do not claim that a proposal, checkout, invoice, payment link, or delivery artifact already exists unless an executed tool result proves it.",
+        "forbidden_claims": [
+          "Do not claim that a proposal, checkout, invoice, payment link, or delivery artifact already exists, is prepared, is submitted, or is delivered unless an executed tool result proves it.",
+          "Do not promise an unsupported delivery deadline.",
+          "Do not expose internal action names, schemas, payloads, implementation packets, routing contracts, workflow jargon, or system state."
+        ]
+      },
+      "side_effect": "persist_custom_proposal_request"
     },
     {
       "id": "present_checkout",
       "enabled": false,
       "exposes_checkout": true,
-      "objective": "When an exact total and payment option are grounded, give the customer the validated checkout action and obtain a payment commitment.",
+      "objective": "Execute the validated checkout step now when the newest inbound message explicitly authorizes one exact grounded payment option.",
       "requires_grounded_total": true,
+      "requires_catalog_offer": true,
       "requires_payment_option": true,
       "allowed_payment_options": [
         "deposit",
@@ -72,40 +77,20 @@
       "requires_explicit_authorization": true,
       "authorization_source": "newest_inbound_message",
       "requires_unambiguous_exact_option": true,
-      "on_missing_authorization": "continue_conversation"
+      "semantic_selection_contract": {
+        "select_when": "The newest inbound message explicitly and unambiguously authorizes one exact grounded payment option and asks to proceed now.",
+        "selection_priority": "When select_when is satisfied, select present_checkout instead of not_selected or request_payment_choice.",
+        "required_response": "Render the exact available checkout artifact or validated checkout mechanism in the current reply. Do not merely repeat generic payment instructions.",
+        "safety": "Do not invent totals, terms, links, payment methods, timing, scope, or claim an external side effect that the available tool cannot perform."
+      },
+      "response_contract": {
+        "render_in_current_reply": true,
+        "customer_input_allowed": false,
+        "questions_allowed": false,
+        "generic_replay_allowed": false
+      },
+      "on_missing_authorization": "continue_conversation",
+      "side_effect": "present_external_checkout"
     }
-  ],
-  "semantic_progression_policy": {
-    "authority": "language_model_semantic_reasoning",
-    "rules": [
-        "Treat a fact as a material blocker only when a concise semantic rationale explains why its answer materially changes the recommendation, architecture, scope, estimate, delivery risk, or next executable action.",
-        "Do not convert already answered, generic, or merely useful discovery details into mandatory blockers.",
-      "Do not repeat a qualifier already requested unless the customer asks for clarification.",
-      "When scope is sufficiently understood and no grounded total exists, provide a grounded solution hypothesis and seek one decision that materially determines scope, delivery, or the next executable action. Do not create a pseudo-action for future preparation.",
-      "Request one concrete customer commitment that advances the transaction."
-    ]
-  },
-  "review_contract": {
-    "independently_review_semantic_fit": true,
-    "reject_invented_material_blockers": true,
-    "reject_repeated_qualifiers": true,
-    "require_nearest_useful_commercial_step": true,
-    "prohibit_customer_facing_tool_metadata": true
-  },
-  "conversation_policy": {
-    "mode": "consultative_semantic",
-    "discovery_before_transaction": true,
-    "paid_discovery_is_not_default": true,
-    "one_high_information_question_per_turn": true,
-    "preserve_shared_context_across_workstreams": true,
-    "reset_transaction_readiness_on_workstream_change": true,
-    "prohibit_canned_sales_scripts": true,
-    "transactional_authorization": {
-      "source": "newest_inbound_message",
-      "explicit": true,
-      "unambiguous": true,
-      "exact_action_and_option": true,
-      "ambiguous_confirmation_requires_clarification": true
-    }
-  }
+  ]
 }

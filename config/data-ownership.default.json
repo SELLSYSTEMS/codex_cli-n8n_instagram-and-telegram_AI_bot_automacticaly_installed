@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "database": {
+    "defaultBackend": "local-postgresql-pgvector",
+    "canonicalSchema": "agent",
+    "legacyNamespacePattern": "public.bot_*",
+    "legacyWritePolicy": "forbidden",
+    "legacyRetirementGates": [
+      "backup-created",
+      "row-counts-recorded",
+      "identity-and-conversation-reconciliation-reviewed",
+      "operator-approved"
+    ]
+  },
+  "brainApi": {
+    "owns": [
+      "conversation-semantics",
+      "memory",
+      "rag",
+      "tools",
+      "escalation",
+      "model-routing"
+    ]
+  },
+  "channelAdapters": {
+    "owns": [
+      "channel-authentication",
+      "payload-normalization",
+      "delivery",
+      "delivery-idempotency"
+    ],
+    "mustNotOwn": [
+      "tenant-sales-policy",
+      "intent-keyword-trees",
+      "language-routing-trees",
+      "escalation-keyword-trees"
+    ]
+  },
+  "n8n": {
+    "role": "replaceable-channel-and-operations-shell"
+  },
+  "payments": {
+    "role": "external-operator-configured-application",
+    "repositoryOwnership": "contract-only"
+  }
+}

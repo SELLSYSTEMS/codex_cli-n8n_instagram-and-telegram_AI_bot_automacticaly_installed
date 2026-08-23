@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Machine-readable ownership registry for every mutable system domain.",
+  "domains": {
+    "database": {
+      "owner": "brain-api",
+      "publicContract": "config/data-ownership.default.json",
+      "canonicalStore": "local-postgresql-pgvector",
+      "canonicalSchema": "agent",
+      "legacyPolicy": "archive-only",
+      "legacyArchiveRoot": ".private/archives/database"
+    },
+    "modelRouting": {
+      "owner": "brain-api",
+      "publicContract": "config/model-routes.default.json",
+      "runtimeOverride": ".runtime/model-routes.json",
+      "runtimeEvidence": "/health",
+      "changePolicy": "file-backed-controlled-restart"
+    },
+    "commercialActions": {
+      "owner": "brain-api",
+      "publicContract": "config/commercial-actions.default.json",
+      "privateOverride": ".private/active/commercial/commercial-actions.json",
+      "executionPolicy": "structured-authorized-external-action"
+    },
+    "tenantKnowledge": {
+      "owner": "brain-api",
+      "privateManifest": ".private/active/knowledge/knowledge-manifest.json",
+      "publicPolicy": "tenant-data-never-committed"
+    },
+    "conversationSemantics": {
+      "owner": "brain-api",
+      "publicPrompt": "prompts/brain-system.md",
+      "privatePolicy": ".private/active/knowledge/runtime-consultative-sales-policy.md",
+      "decisionPolicy": "llm-semantic-reasoning"
+    },
+    "channelDelivery": {
+      "owner": "n8n-shell",
+      "publicContract": "docs/architecture.md",
+      "decisionPolicy": "no-business-semantics-in-adapters"
+    },
+    "operations": {
+      "owner": "operator",
+      "privateRoot": ".private/operations",
+      "runtimeRoot": ".runtime",
+      "archiveRoot": ".private/archives"
+    }
+  }
+}

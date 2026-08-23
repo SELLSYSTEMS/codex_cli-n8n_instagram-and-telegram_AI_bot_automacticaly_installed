@@ -55,8 +55,9 @@ if (!openai || openai.model !== 'gpt-4.1' || openai.enabled !== false) {
   errors.push('config/model-routes.default.json: OpenAI route must be disabled and use gpt-4.1');
 }
 const enabled = routeConfig.routes.filter((route) => route.enabled).sort((a, b) => a.priority - b.priority);
-if (enabled[0]?.model !== 'gpt-5.3-codex-spark') {
-  errors.push('config/model-routes.default.json: Codex Spark must be the first enabled route');
+const enabledChain = enabled.map((route) => `${route.provider}/${route.model}`);
+if (JSON.stringify(enabledChain) !== JSON.stringify(['codex_cli/gpt-5.6-sol', 'codex_cli/gpt-5.3-codex-spark'])) {
+  errors.push('config/model-routes.default.json: enabled chain must be Codex 5.6 followed by Codex Spark only');
 }
 
 const workflowFiles = files.filter((file) => file.startsWith('workflows/') && file.endsWith('.json'));

@@ -35,12 +35,12 @@
     "response_language": {
       "type": "string",
       "minLength": 1,
-      "description": "The natural language selected from the newest customer message, or the language explicitly requested by the customer."
+      "description": "Language selected semantically for the reply. English is the default for new or uncertain conversations. Preserve the established language for short, mixed, or ambiguous messages; switch only when the customer explicitly requests another language or clearly communicates predominantly in it."
     },
     "reply_language_consistent": {
       "type": "boolean",
       "const": true,
-      "description": "True only after every natural-language fragment of reply has been audited and uses response_language, excluding proper nouns, URLs and code."
+      "description": "True only when the complete natural-language reply is coherent in response_language, apart from proper nouns, URLs, identifiers, code, and other unavoidable literals."
     },
     "intent": {
       "type": "string",
@@ -112,12 +112,12 @@
     },
     "material_blocker": {
       "type": "string",
-      "description": "The single genuinely material unresolved issue preventing the next commitment, or an empty string when none exists."
+      "description": "The single genuinely material unresolved issue preventing every safe, useful, reversible next step, or an empty string when none exists. Optional onboarding details are not material blockers."
     },
     "next_best_action": {
       "type": "string",
       "minLength": 1,
-      "description": "The best concrete customer-visible action to perform in this reply. It must create an externally observable outcome, not describe internal note-taking, preparation, planning, or future work. When the customer is ready to proceed and no material blocker remains, it must include one grounded recommendation or value synthesis and one explicit, easy-to-answer commitment request."
+      "description": "The best concrete customer-visible action to perform in this reply. It must create an externally observable outcome, not describe internal note-taking, preparation, planning, or future work. When the customer is ready to proceed and no material blocker remains, it must include one grounded recommendation or value synthesis and one explicit, easy-to-answer commitment request. When scope, amount, currency, terms, and authorization are grounded, execute the eligible commercial action and provide its instructions instead of reopening discovery."
     },
     "commercial_progress": {
       "type": "string",
@@ -134,21 +134,21 @@
         "committed",
         "not_applicable"
       ],
-      "description": "Semantic state of the customer's decision. Explicit acceptance of the immediately preceding proposal counts as agreement; a compatible refinement does not revoke it."
+      "description": "Semantic state of the customer's decision. Explicit acceptance of the immediately preceding proposal counts as agreement; a compatible refinement or optional unresolved detail does not revoke or downgrade it."
     },
     "confirmed_commitments": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "description": "Cumulative customer-approved decisions and constraints from the conversation. Preserve compatible prior agreements and never reopen unchanged commitments."
+      "description": "Cumulative customer-approved decisions and constraints from the conversation. Preserve compatible prior agreements and never reopen unchanged commitments. When a short assent clearly accepts the uniquely pending proposal, record that proposal as confirmed."
     },
     "pending_customer_commitment": {
       "type": [
         "string",
         "null"
       ],
-      "description": "At most one genuinely unresolved customer action required to progress. Use null when none remains. An optional implementation detail, repeated final confirmation, or internal planning step is not a pending customer commitment."
+      "description": "At most one genuinely unresolved customer action required to progress. Use null when none remains or when the customer has supplied or accepted it. An optional implementation detail, repeated final confirmation, or internal planning step is neither a pending customer commitment nor a material blocker."
     },
     "should_reply": {
       "type": "boolean"
@@ -175,27 +175,7 @@
     "contact_profile": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "name",
-        "company",
-        "role",
-        "email",
-        "phone",
-        "language",
-        "locale",
-        "country",
-        "currency",
-        "needs",
-        "goals",
-        "constraints",
-        "objections",
-        "preferences",
-        "budget",
-        "timeline",
-        "decision_authority",
-        "lifecycle_stage",
-        "facts"
-      ],
+      "description": "Complete contact-memory assessment for this turn. Use null for unknown scalar values and empty arrays for unknown list values; never guess or invent contact facts.",
       "properties": {
         "name": {
           "type": [
@@ -231,7 +211,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Explicitly requested or semantically clear preferred conversation language. Do not infer it from names, locations, phone codes, currencies, quoted text, isolated words, or metadata."
         },
         "locale": {
           "type": [
@@ -310,8 +291,53 @@
           "items": {
             "type": "string"
           }
+        },
+        "preferred_contact_channel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The contact channel explicitly preferred by the customer, or null when not known."
+        },
+        "preferred_contact_time": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The customer-provided preferred follow-up time or time window, or null when not known."
+        },
+        "timezone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The customer-provided or reliably inferred timezone for follow-up, or null when not known."
         }
-      }
+      },
+      "required": [
+        "name",
+        "company",
+        "role",
+        "email",
+        "phone",
+        "language",
+        "locale",
+        "country",
+        "currency",
+        "needs",
+        "goals",
+        "constraints",
+        "objections",
+        "preferences",
+        "budget",
+        "timeline",
+        "decision_authority",
+        "lifecycle_stage",
+        "facts",
+        "preferred_contact_channel",
+        "preferred_contact_time",
+        "timezone"
+      ]
     },
     "commercial_action": {
       "type": "object",
@@ -328,7 +354,7 @@
             "string",
             "null"
           ],
-          "description": "LLM-selected commercial action. request_required_fact is valid only for a fact explicitly identified as mandatory by authoritative supplied context."
+          "description": "ID of an enabled external side-effect action from the authoritative commercial catalog. Never use a dialogue-stage or planning-artifact ID."
         },
         "selection_reason": {
           "type": "string",
@@ -345,17 +371,24 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "offer_id",
             "option_id",
             "grounded_total_usd",
             "grounding_reference",
-          "missing_fact",
-          "customer_commitment",
-          "authorization_is_explicit",
-          "authorization_is_unambiguous",
-          "authorization_evidence",
-          "authorization_scope"
+            "missing_fact",
+            "customer_commitment",
+            "authorization_is_explicit",
+            "authorization_is_unambiguous",
+            "authorization_evidence",
+            "authorization_scope"
           ],
           "properties": {
+            "offer_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "option_id": {
               "type": [
                 "string",
@@ -407,7 +440,8 @@
             }
           }
         }
-      }
+      },
+      "description": "External side-effect tool request selected by the model. Ordinary conversation uses selected=false with action_id=null. Dialogue acts, discovery, recommendations, objection handling, sales progression, profile reasoning, and escalation reasoning are not tools."
     },
     "commercial_next_step": {
       "type": "object",

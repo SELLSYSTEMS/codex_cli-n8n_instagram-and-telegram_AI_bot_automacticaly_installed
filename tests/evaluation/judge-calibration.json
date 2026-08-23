@@ -1,0 +1,136 @@
+[
+  {
+    "id": "strong-discovery",
+    "material": {
+      "trace_input": {
+        "message": "We need a chatbot for our clinics but I am not sure what should be automated."
+      },
+      "agent_output": {
+        "reply_text": "I can help map that out. Which conversations consume the most staff time today: appointment questions, booking changes, follow-ups, or something else? Once I understand the bottleneck and the channels you use, I can suggest a practical first version.",
+        "commercial_action": "discover"
+      },
+      "supporting_observations": []
+    },
+    "human": {
+      "overall_score": 0.95,
+      "verdict": "pass"
+    }
+  },
+  {
+    "id": "premature-checkout",
+    "material": {
+      "trace_input": {
+        "message": "I may need a bot. What can it do?"
+      },
+      "agent_output": {
+        "reply_text": "Great. Pay the audit fee now and we will begin.",
+        "commercial_action": "checkout"
+      },
+      "supporting_observations": []
+    },
+    "human": {
+      "overall_score": 0.2,
+      "verdict": "fail"
+    }
+  },
+  {
+    "id": "unexpected-language-switch",
+    "material": {
+      "trace_input": {
+        "message": "Can it connect to our CRM and WhatsApp?",
+        "conversation_history": [
+          {
+            "role": "user",
+            "content": "Hello, we want to automate customer support."
+          }
+        ]
+      },
+      "agent_output": {
+        "reply_text": "Да, это возможно. Расскажите подробнее.",
+        "commercial_action": "discover"
+      },
+      "supporting_observations": []
+    },
+    "human": {
+      "overall_score": 0.25,
+      "verdict": "fail"
+    }
+  },
+  {
+    "id": "context-continuity",
+    "material": {
+      "trace_input": {
+        "message": "Email is best. Can you send the outline there?",
+        "conversation_history": [
+          {
+            "role": "user",
+            "content": "My name is Taylor and the email is taylor@example.test."
+          },
+          {
+            "role": "assistant",
+            "content": "Thanks, Taylor. Which communication channel do you prefer?"
+          }
+        ]
+      },
+      "agent_output": {
+        "reply_text": "Yes. I have email as your preferred channel and can use taylor@example.test for the outline. Before preparing it, what is the main workflow you want the first version to cover?",
+        "commercial_action": "discover"
+      },
+      "supporting_observations": []
+    },
+    "human": {
+      "overall_score": 0.92,
+      "verdict": "pass"
+    }
+  },
+  {
+    "id": "unsupported-claim",
+    "material": {
+      "trace_input": {
+        "message": "Does your package include a 24/7 human support guarantee?"
+      },
+      "agent_output": {
+        "reply_text": "Yes, every package includes guaranteed 24/7 human support.",
+        "commercial_action": "answer"
+      },
+      "supporting_observations": [
+        {
+          "name": "brain.rag.retrieve",
+          "output": {
+            "documents": []
+          }
+        }
+      ]
+    },
+    "human": {
+      "overall_score": 0.15,
+      "verdict": "fail"
+    }
+  },
+  {
+    "id": "justified-escalation",
+    "material": {
+      "trace_input": {
+        "message": "I was charged twice and need the duplicate charge reversed today.",
+        "conversation_history": []
+      },
+      "agent_output": {
+        "reply_text": "I am sorry about the duplicate charge. I cannot reverse a payment directly, so I am escalating this to a billing specialist with the details you provided. You will not need to repeat them.",
+        "commercial_action": "escalate"
+      },
+      "supporting_observations": [
+        {
+          "name": "brain.action",
+          "output": {
+            "escalation_created": true,
+            "reason": "billing reversal requires authorized human"
+          }
+        }
+      ]
+    },
+    "human": {
+      "overall_score": 0.9,
+      "verdict": "pass"
+    }
+  }
+]
