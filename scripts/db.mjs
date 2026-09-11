@@ -5,6 +5,7 @@ import {
   compactCommercialAction,
   deriveSemanticState,
 } from './semantic-state.mjs';
+import { normalizeDurableMemory } from './durable-memory.mjs';
 
 const { Pool } = pg;
 const connectionString = process.env.LOCAL_POSTGRES_URL;
@@ -231,10 +232,141 @@ function mergeContactProfile(current, incoming) {
   );
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function mergeUniqueBounded(current, incoming, limit = 50) {
+  const values = [
+    ...(Array.isArray(current) ? current : []),
+    ...(Array.isArray(incoming) ? incoming : []),
+  ];
+  const unique = new Map();
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue;
+    unique.set(canonicalJson(value), value);
+  }
+  return [...unique.values()].slice(-limit);
+}
+
+function upsertWorkstream(current, name, solutionScope) {
+  const workstreamName = cleanText(name, 500);
+  const existing = Array.isArray(current) ? current : [];
+  if (!workstreamName) return existing.slice(-12);
+
+  const retained = existing.filter((item) => {
+    if (typeof item === 'string') return item !== workstreamName;
+    return cleanText(item?.name || item?.workstream || item?.objective, 500) !== workstreamName;
+  });
+  return [
+    ...retained,
+    {
+      name: workstreamName,
+      solution_scope: cleanObject(solutionScope),
+    },
+  ].slice(-12);
+}
+
+function buildDurableMemory(turn, decision, profilePatch, commercialAction) {
+  const prior = normalizeDurableMemory(turn.conversation?.durable_memory || {});
+  const activeWorkstream = cleanText(
+    decision.activeWorkstream || decision.active_workstream,
+    500,
+  );
+  const solutionScope = cleanObject(decision.solutionScope || decision.solution_scope);
+  const commitments = Array.isArray(decision.confirmedCommitments || decision.confirmed_commitments)
+    ? (decision.confirmedCommitments || decision.confirmed_commitments)
+        .map((item) => cleanText(item, 1000))
+        .filter(Boolean)
+    : [];
+  const blockerProvided = Object.hasOwn(decision, 'materialBlocker')
+    || Object.hasOwn(decision, 'material_blocker');
+  const blocker = blockerProvided
+    ? cleanText(decision.materialBlocker || decision.material_blocker, 1000) || null
+    : prior.unresolved_material_question;
+  const groundingRefs = Array.isArray(commercialAction?.grounding_refs)
+    ? commercialAction.grounding_refs
+    : [];
+  const activeRequest = Array.isArray(turn.activeCommercialRequests)
+    ? turn.activeCommercialRequests[0] || null
+    : null;
+  const proposedCommercialReadiness = cleanText(
+    decision.commercialReadiness || decision.commercial_readiness,
+    80,
+  );
+  const commercialReadiness = ['not_ready', 'considering', 'explicitly_ready'].includes(
+    proposedCommercialReadiness,
+  )
+    ? proposedCommercialReadiness
+    : prior.commercial_readiness;
+  const proposedScopeSufficiency = cleanText(
+    decision.scopeSufficiency || decision.scope_sufficiency,
+    80,
+  );
+  const scopeSufficiency = ['insufficient', 'proposal_ready', 'transaction_ready'].includes(
+    proposedScopeSufficiency,
+  )
+    ? proposedScopeSufficiency
+    : prior.scope_sufficiency;
+  const materialQuestionResolved = blockerProvided
+    && blocker === null
+    && commercialReadiness === 'explicitly_ready'
+    && ['proposal_ready', 'transaction_ready'].includes(scopeSufficiency);
+
+  return normalizeDurableMemory({
+    ...prior,
+    current_objective: activeWorkstream || prior.current_objective,
+    active_workstreams: upsertWorkstream(
+      prior.active_workstreams,
+      activeWorkstream,
+      solutionScope,
+    ),
+    settled_customer_facts: Object.keys(solutionScope).length
+      ? {
+          ...cleanObject(prior.settled_customer_facts),
+          solution_scope: solutionScope,
+        }
+      : prior.settled_customer_facts,
+    confirmed_commitments: mergeUniqueBounded(
+      prior.confirmed_commitments,
+      commitments,
+      50,
+    ),
+    commercial_readiness: commercialReadiness,
+    scope_sufficiency: scopeSufficiency,
+    unresolved_material_question: materialQuestionResolved ? null : blocker,
+    active_commercial_lifecycle:
+      Object.keys(cleanObject(commercialAction)).length > 0
+        ? commercialAction
+        : activeRequest || prior.active_commercial_lifecycle,
+    sparse_contact_profile: {
+      ...cleanObject(prior.sparse_contact_profile),
+      ...cleanObject(profilePatch),
+    },
+    established_response_language:
+      cleanText(decision.responseLanguage || decision.response_language, 80)
+      || prior.established_response_language,
+    authoritative_evidence_references: mergeUniqueBounded(
+      prior.authoritative_evidence_references,
+      groundingRefs,
+      50,
+    ),
+  }, prior);
+}
+
 export async function finishTurn(turn, decision, modelRun) {
   const reply = cleanText(decision.reply);
   const shouldReply = decision.should_reply !== false && Boolean(reply);
-  const action = decision.should_escalate ? 'escalate' : shouldReply ? 'reply' : 'silent';
+  const action =
+    decision.action === 'escalate' || decision.should_escalate
+      ? 'escalate'
+      : decision.action === 'silent' || !shouldReply
+        ? 'silent'
+        : 'reply';
   const summary = cleanText(decision.conversationSummary || decision.conversation_summary, 8000);
   const solutionScope = cleanObject(decision.solutionScope || decision.solution_scope);
   const confirmedCommitments = Array.isArray(decision.confirmedCommitments || decision.confirmed_commitments)
@@ -277,6 +409,16 @@ export async function finishTurn(turn, decision, modelRun) {
     commercial_action: compactCommercialAction(
       decision.commercialAction || decision.commercial_action,
     ),
+    commercial_readiness:
+      decision.commercialReadiness ||
+      decision.commercial_readiness ||
+      priorSemanticState.commercial_readiness ||
+      'not_ready',
+    scope_sufficiency:
+      decision.scopeSufficiency ||
+      decision.scope_sufficiency ||
+      priorSemanticState.scope_sufficiency ||
+      'insufficient',
     commercial_next_step:
       decision.commercialNextStep ||
       decision.commercial_next_step ||
@@ -296,6 +438,12 @@ export async function finishTurn(turn, decision, modelRun) {
         decisionProfilePatch
       );
       semanticState.contact_profile = profilePatch;
+  const durableMemory = buildDurableMemory(
+    turn,
+    decision,
+    profilePatch,
+    semanticState.commercial_action,
+  );
   const escalationReason = cleanText(decision.escalationReason || decision.escalation_reason, 2000);
 
   if (decision.should_reply !== false && !reply) throw new Error('The model returned an empty reply');
@@ -333,8 +481,15 @@ export async function finishTurn(turn, decision, modelRun) {
     );
 
     const conversationResult = await client.query(
-      "update agent.conversations set summary = coalesce(nullif($2, ''), summary), semantic_state = semantic_state || $3::jsonb, status = case when $4 = 'escalate' then 'escalated' else status end, escalated_at = case when $4 = 'escalate' then coalesce(escalated_at, now()) else escalated_at end, escalation_reason = case when $4 = 'escalate' then nullif($5, '') else escalation_reason end, last_message_at = now() where id = $1 returning *",
-      [turn.conversation.id, summary, JSON.stringify(semanticState), action, escalationReason]
+      "update agent.conversations set summary = coalesce(nullif($2, ''), summary), semantic_state = semantic_state || $3::jsonb, status = case when $4 = 'escalate' then 'escalated' else status end, escalated_at = case when $4 = 'escalate' then coalesce(escalated_at, now()) else escalated_at end, escalation_reason = case when $4 = 'escalate' then nullif($5, '') else escalation_reason end, durable_memory = $6::jsonb, durable_memory_version = 3, last_message_at = now() where id = $1 returning *",
+      [
+        turn.conversation.id,
+        summary,
+        JSON.stringify(semanticState),
+        action,
+        escalationReason,
+        JSON.stringify(durableMemory),
+      ]
     );
 
     await client.query(

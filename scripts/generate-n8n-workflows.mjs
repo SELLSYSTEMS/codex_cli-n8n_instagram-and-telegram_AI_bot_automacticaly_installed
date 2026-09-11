@@ -308,15 +308,15 @@ function operatorWorkflows() {
     '## Model priority control',
     'Edit only the values in Editable operator input, then run this workflow.',
     'Lower priority numbers run first. Disabled providers are never called.',
-    'Default: Codex gpt-5.6-sol with high reasoning. Codex Spark is the only enabled fallback and may run only after confirmed gpt-5.6-sol quota or rate-limit exhaustion. API providers stay disabled by default.',
+    'Default: OpenAI gpt-4.1 is primary. DeepSeek Pro is the only enabled fallback and may run only after a classified provider availability, quota, transient transport, or open-circuit failure. Codex CLI and DeepSeek Flash routes stay disabled by default.',
   ].join('\n'), [
     'return [{ json: { routes: [',
-    "  { id: 'codex_gpt_5_6_sol', provider: 'codex_cli', model: 'gpt-5.6-sol', enabled: true, priority: 10, reasoning_effort: 'high' },",
-    "  { id: 'codex_spark', provider: 'codex_cli', model: 'gpt-5.3-codex-spark', enabled: true, priority: 20, reasoning_effort: 'low' },",
-    "  { id: 'openai_api', provider: 'openai', model: 'gpt-4.1', enabled: false, priority: 30 },",
-    "  { id: 'deepseek_v4_pro', provider: 'deepseek', model: 'deepseek-v4-pro', enabled: false, priority: 40 },",
+    "  { id: 'openai_api', provider: 'openai', model: 'gpt-4.1', enabled: true, priority: 10, supports_reasoning: false, reasoning_effort: 'low' },",
+    "  { id: 'deepseek_v4_pro', provider: 'deepseek', model: 'deepseek-v4-pro', enabled: true, priority: 20, reasoning_effort: 'high' },",
+    "  { id: 'codex_gpt_5_6_sol', provider: 'codex_cli', model: 'gpt-5.6-sol', enabled: false, priority: 30, reasoning_effort: 'high' },",
+    "  { id: 'codex_spark', provider: 'codex_cli', model: 'gpt-5.3-codex-spark', enabled: false, priority: 40, reasoning_effort: 'low' },",
     "  { id: 'codex_mini', provider: 'codex_cli', model: 'gpt-5.4-mini', enabled: false, priority: 50, reasoning_effort: 'low' },",
-    "  { id: 'deepseek_v4_flash', provider: 'deepseek', model: 'deepseek-v4-flash', enabled: false, priority: 60 }",
+    "  { id: 'deepseek_v4_flash', provider: 'deepseek', model: 'deepseek-v4-flash', enabled: false, priority: 999, reasoning_effort: 'low' }",
     '] } }];',
   ].join('\n'), '/v1/admin/model-routes', 'PUT');
 

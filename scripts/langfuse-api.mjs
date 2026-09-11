@@ -144,15 +144,13 @@ export function runtimeScoreDefinitions(result) {
     ?? commercial?.selection?.action_id
     ?? commercial?.selection?.actionId,
   );
-  const commercialActionValid = selectedCommercialAction
-    ? commercial?.valid === true
-    : semanticConformance?.performed === true && semanticConformance?.passed === true;
+  const commercialActionValid = !selectedCommercialAction || commercial?.valid === true;
   return [
     ['response_contract_valid', silent || hasReply, 'A model reply or an explicit no-reply action is present.'],
     ['reply_policy_consistent', silent ? !hasOutbound : hasReply, 'A no-reply turn emits no outbound message; a reply turn contains model output.'],
     ['memory_state_returned', Boolean(memory), 'The Brain returned persistent conversation state.'],
     ['model_route_recorded', silent || Boolean(routeName(result)), 'A model route is recorded whenever model inference is required.'],
-    ['commercial_action_valid', commercialActionValid, 'Commercial action selection and dispatch match the semantically audited turn.'],
+    ['commercial_action_valid', commercialActionValid, 'No commercial action was selected, or the selected action passed deterministic validation and dispatch.'],
     ['escalation_policy_consistent', !escalation || typeof escalation === 'boolean' || typeof escalation === 'string' || typeof escalation === 'object', 'Escalation state has a valid contract.'],
   ].map(([name, value, comment]) => ({ name, value: value ? 1 : 0, dataType: 'BOOLEAN', comment }));
 }

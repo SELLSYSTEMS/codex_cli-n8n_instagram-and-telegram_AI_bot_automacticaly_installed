@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "selection_mode": "external_side_effects_only",
+  "selection_mode": "durable_internal_and_external_actions",
   "instructions": {
-    "purpose": "Expose only real external side effects as model-selectable tools.",
+    "purpose": "Expose only declared durable internal commercial transitions and real external side effects as model-selectable tools.",
     "semantic_reasoning_owner": "The language model owns conversation, discovery, recommendations, objection handling, sales progression, profile reasoning, and escalation reasoning.",
-    "tool_boundary": "Never represent a dialogue act, planning artifact, question, recommendation, or internal state transition as a commercial action.",
-    "authorization": "Keep commercial_action unselected unless the newest customer message explicitly and unambiguously authorizes an enabled grounded external action and exact option.",
+    "tool_boundary": "Never represent a dialogue act, planning artifact, question, recommendation, or ordinary memory update as a commercial action. Persisting a grounded custom-proposal request is an allowed durable internal commercial transition.",
+    "authorization": "A custom-proposal request requires a grounded current commitment to the uniquely active workstream. Payment and other external actions require explicit, unambiguous authorization in the newest customer message.",
     "keyword_routing_forbidden": true,
     "response_templates_forbidden": true
   },
@@ -60,7 +60,16 @@
           "Do not expose internal action names, schemas, payloads, implementation packets, routing contracts, workflow jargon, or system state."
         ]
       },
-      "side_effect": "persist_custom_proposal_request"
+      "side_effect": "persist_custom_proposal_request",
+      "requires_explicit_authorization": false,
+      "commitment_contract": {
+        "evidence_field": "customer_commitment",
+        "scope_field": "authorization_scope",
+        "evidence_must_quote_newest_inbound": true,
+        "scope_must_be_grounded_in_active_workstream": true,
+        "accepted_evidence": "text",
+        "bare_acknowledgement_is_insufficient_without_unique_pending_scope": true
+      }
     },
     {
       "id": "present_checkout",

@@ -1,6 +1,7 @@
 import http from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
-import { runBrain } from './instrumented-brain-graph.mjs';
+import { handleChannelIntegrityRoute } from './channel-integrity-api.mjs';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { runBrain as runBrainCore } from './instrumented-brain-graph.mjs';
 import {
   dbHealth,
   resetEscalation,
@@ -11,6 +12,19 @@ import {
 } from './db.mjs';
 import { getModelRoutes, setModelRoutes } from './model-router.mjs';
 import { chunkText, sha256 } from './knowledge.mjs';
+import {
+  runtimeCoordinator,
+  QueueOverloadError,
+  TurnDeadlineError,
+} from './runtime-coordinator.mjs';
+import { finalizeDecisionIntegrity } from './decision-integrity.mjs';
+import { closeRuntimeStore } from './runtime-store.mjs';
+import {
+  claimInboundEvent,
+  completeInboundEvent,
+  closeInboundMemoryStore,
+  InboundIdentityConflictError,
+} from './inbound-memory-store.mjs';
 
 function normalizeKnowledge(input) {
   const content = typeof input.content === 'string' ? input.content.trim() : '';
@@ -102,7 +116,122 @@ function normalizeMessage(input) {
   };
 }
 
+async function runCoordinatedBrain(input) {
+  const key = [input.tenantKey, input.channel, input.externalThreadId].join(':');
+  return runtimeCoordinator.run(
+    {
+      conversationKey: key,
+      dedupeKey: input.externalMessageId,
+    },
+    async ({ deadlineAt }) => {
+      const result = await runBrainCore({ ...input, deadlineAt });
+      if (result?.commercial_request?.id) return result;
+      return finalizeDecisionIntegrity({ input, result });
+    },
+  );
+}
+
+function inboundRequestHash(input) {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      tenantKey: input.tenantKey,
+      channel: input.channel,
+      channelAccountId: input.channelAccountId,
+      externalUserId: input.externalUserId,
+      externalThreadId: input.externalThreadId,
+      externalMessageId: input.externalMessageId,
+      text: input.text,
+    }))
+    .digest('hex');
+}
+
+function durableFailure(error, input) {
+  if (error instanceof QueueOverloadError) {
+    return { status: 429, code: 'overloaded' };
+  }
+  if (error instanceof TurnDeadlineError) {
+    return { status: 503, code: 'deadline_exceeded' };
+  }
+  return { status: 500, code: 'decision_failed' };
+}
+
+async function runDurableBrain(input) {
+  const conversationKey = [
+    input.tenantKey,
+    input.channel,
+    input.channelAccountId,
+    input.externalThreadId,
+  ].join(':');
+  const claim = await claimInboundEvent({
+    tenantKey: input.tenantKey,
+    conversationKey,
+    channel: input.channel,
+    providerEventId: input.externalMessageId,
+    requestHash: inboundRequestHash(input),
+  });
+
+  if (!claim.claimed) {
+    if (claim.status === 'completed') {
+      return { status: 200, body: claim.response };
+    }
+    if (claim.status === 'processing') {
+      return {
+        status: 202,
+        body: {
+          status: 'processing',
+          retryable: true,
+          suppress_reply: true,
+          external_message_id: input.externalMessageId,
+        },
+      };
+    }
+    return {
+      status: claim.errorCode === 'overloaded' ? 429 : 503,
+      body: claim.response || {
+        error: claim.errorCode || 'not_completed',
+        retryable: false,
+        suppress_reply: true,
+        external_message_id: input.externalMessageId,
+      },
+    };
+  }
+
+  try {
+    const result = await runCoordinatedBrain(input);
+    await completeInboundEvent({ eventId: claim.eventId, status: 'completed', response: result });
+    return { status: 200, body: result };
+  } catch (error) {
+    const failure = durableFailure(error, input);
+    console.error(JSON.stringify({
+      event: 'brain_decision_failed',
+      error_name: String(error?.name || 'Error').slice(0, 120),
+      error_code: String(error?.code || '').slice(0, 120) || null,
+      error_message: String(error?.message || 'Unknown Brain failure').slice(0, 500),
+      tenant_key: input.tenantKey,
+      channel: input.channel,
+      external_message_id_hash: createHash('sha256')
+        .update(String(input.externalMessageId || ''))
+        .digest('hex')
+        .slice(0, 16),
+    }));
+    const response = {
+      error: failure.code,
+      retryable: false,
+      suppress_reply: true,
+      external_message_id: input.externalMessageId,
+    };
+    await completeInboundEvent({
+      eventId: claim.eventId,
+      status: 'failed',
+      response,
+      errorCode: failure.code,
+    });
+    return { status: failure.status, body: response };
+  }
+}
+
 const server = http.createServer(async (req, res) => {
+  if (await handleChannelIntegrityRoute(req, res)) return;
   try {
     const url = new URL(req.url || '/', 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -113,7 +242,14 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/v1/messages' && req.method === 'POST') {
       if (!authorized(req)) return send(res, 401, { error: 'unauthorized' });
-      send(res, 200, await runBrain(normalizeMessage(await body(req))));
+      const result = await runDurableBrain(normalizeMessage(await body(req)));
+      send(res, result.status, result.body);
+      return;
+    }
+
+    if (url.pathname === '/v1/admin/runtime-metrics' && req.method === 'GET') {
+      if (!authorized(req, true)) return send(res, 401, { error: 'unauthorized' });
+      send(res, 200, runtimeCoordinator.metrics());
       return;
     }
 
@@ -161,6 +297,15 @@ const server = http.createServer(async (req, res) => {
 
     send(res, 404, { error: 'not found' });
   } catch (error) {
+    if (error instanceof InboundIdentityConflictError) {
+      return send(res, 409, { error: 'provider_event_identity_conflict' });
+    }
+    if (error instanceof QueueOverloadError) {
+      return send(res, 429, { error: 'overloaded', retryable: true });
+    }
+    if (error instanceof TurnDeadlineError) {
+      return send(res, 503, { error: 'deadline_exceeded', retryable: true });
+    }
     console.error(error);
     send(res, 500, { error: String(error?.message || error) });
   }
@@ -172,6 +317,8 @@ server.listen(port, host, () => {
 
 async function shutdown() {
   server.close();
+  await closeInboundMemoryStore();
+  await closeRuntimeStore();
   await closeDatabase();
   process.exit(0);
 }

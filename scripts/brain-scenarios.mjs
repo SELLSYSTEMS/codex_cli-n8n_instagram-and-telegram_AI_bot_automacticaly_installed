@@ -319,7 +319,7 @@ const criticalFailures = [
   ...(Array.isArray(judged.critical_failures) ? judged.critical_failures : []),
   ...contractFailures,
 ];
-const passed = judged.average_score >= 8
+const passed = judged.average_score >= 9
   && criticalFailures.length === 0;
 
 await fs.mkdir('.runtime/test-results', { recursive: true });
@@ -342,5 +342,5 @@ console.log(JSON.stringify({
   report: reportPath,
 }, null, 2));
 
-assert(judged.average_score >= 8, 'Scenario quality average is below 8/10: ' + judged.average_score);
+assert(judged.average_score >= 9, 'Scenario quality average is below 9/10: ' + judged.average_score);
 assert(criticalFailures.length === 0, 'Scenario judge found critical failures: ' + JSON.stringify(criticalFailures));

@@ -17,12 +17,15 @@
     "brain:smoke": "node scripts/brain-smoke.mjs",
     "brain:scenarios": "npm run tests:language && node scripts/brain-scenarios.mjs",
     "knowledge:ingest": "node scripts/ingest-knowledge.mjs --path .private",
+    "knowledge:reembed": "node scripts/reembed-knowledge.mjs",
+    "knowledge:embedding:audit": "node --env-file=.env scripts/audit-embedding-index.mjs",
     "workflows:generate": "node scripts/generate-n8n-workflows.mjs",
     "workflows:deploy": "node scripts/deploy-n8n-workflows.mjs",
     "channels:configure": "node scripts/configure-channel-webhooks.mjs",
     "runtime:verify": "node scripts/verify-runtime.mjs",
     "runtime:deploy": "npm run db:apply && npm run knowledge:ingest && npm run brain:restart && npm run workflows:generate && npm run workflows:deploy && npm run channels:configure && npm run runtime:verify",
-    "runtime:test": "npm run brain:router:test && npm run brain:smoke && npm run brain:scenarios && npm run runtime:verify",
+    "runtime:deterministic": "node --env-file=.env --test scripts/test-runtime-integrity.mjs scripts/test-provider-resilience.mjs scripts/test-action-delivery-integrity.mjs scripts/test-brain-prompt-contract.mjs scripts/test-semantic-release-failsafe.mjs scripts/test-crm-test-isolation.mjs scripts/test-embeddings-provider.mjs scripts/test-commercial-action-grounding.mjs",
+    "runtime:test": "npm run runtime:deterministic && node scripts/test-durable-memory.mjs && node scripts/test-commercial-transition-contract.mjs && npm run brain:router:test && npm run brain:smoke && npm run brain:scenarios && npm run runtime:verify && npm run test:commercial-readiness",
     "template:audit": "node scripts/audit-public-template-safety.mjs && npm run hygiene:audit",
     "knowledge:ingest:curated": "node scripts/ingest-knowledge.mjs --manifest .private/active/knowledge/knowledge-manifest.json",
     "brain:test:consultative": "npm run tests:language && node scripts/brain-scenarios.mjs --file .private/active/tests/discovery-before-transaction-cases.json",
@@ -40,6 +43,10 @@
     "langfuse:cleanup": "node scripts/langfuse-cleanup.mjs",
     "langfuse:import-scenarios": "node scripts/langfuse-import-scenarios.mjs",
     "instagram:webhook:configure": "node scripts/configure-instagram-app-webhook.mjs",
+    "instagram:webhook:check": "node scripts/configure-instagram-app-webhook.mjs --check && node scripts/manage-instagram-token.mjs --check",
+    "instagram:token:install": "node scripts/install-instagram-token-refresh.mjs",
+    "instagram:token:check": "node scripts/manage-instagram-token.mjs --check",
+    "instagram:token:refresh": "node scripts/manage-instagram-token.mjs --refresh",
     "instagram:webhook:diagnose": "node scripts/configure-instagram-app-webhook.mjs --check",
     "tests:language": "node scripts/assert-english-tests.mjs",
     "crm:setup": "node scripts/crm-cli.mjs setup",
@@ -55,15 +62,16 @@
     "order:audit": "npm run project:audit && npm run organization:audit && npm run source-of-truth:audit && npm run database:audit && npm run template:audit",
     "source-of-truth:audit": "node scripts/audit-source-of-truth.mjs",
     "hygiene:audit": "node scripts/audit-structural-hygiene.mjs",
-    "commercial:requests": "node scripts/commercial-request-cli.mjs"
+    "commercial:requests": "node scripts/commercial-request-cli.mjs",
+    "test:commercial-readiness": "node scripts/test-commercial-readiness-contract.mjs"
   },
   "dependencies": {
-    "@langchain/langgraph": "latest",
-    "@langfuse/otel": "^5.9.1",
-    "@langfuse/tracing": "^5.9.1",
-    "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/sdk-node": "^0.220.0",
-    "@xenova/transformers": "^2.17.2",
-    "pg": "^8.16.3"
+    "@langchain/langgraph": "1.4.7",
+    "@langfuse/otel": "5.9.1",
+    "@langfuse/tracing": "5.9.1",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/sdk-node": "0.220.0",
+    "ajv": "8.17.1",
+    "pg": "8.22.0"
   }
 }

@@ -8,29 +8,29 @@ The public contract is config/model-routes.default.json. An installed runtime ma
 
 ## Default order
 
-1. codex_gpt_5_6_sol: Codex CLI model gpt-5.6-sol, high reasoning, enabled primary.
-2. codex_spark: Codex CLI model gpt-5.3-codex-spark, low reasoning, enabled secondary.
-3. openai_api: gpt-4.1, disabled.
-4. deepseek_v4_pro: disabled.
-5. codex_mini: disabled.
+1. openai_api: OpenAI API model gpt-4.1, enabled primary.
+2. deepseek_v4_pro: DeepSeek API model deepseek-v4-pro, enabled secondary.
+3. codex_gpt_5_6_sol: disabled optional development route.
+4. codex_spark: disabled optional development route.
+5. codex_mini: disabled optional development route.
 6. deepseek_v4_flash: disabled.
 
-The secondary route is attempted only when the primary route returns a classified availability or quota failure. Business rejection, malformed tool output, safety refusal and ordinary low-quality text are not provider-fallback signals.
+The secondary route is attempted only when the primary route returns a classified provider-availability, quota, transient-transport, or open-circuit failure. Business rejection, malformed tool output, safety refusal, and ordinary low-quality prose are not provider-fallback signals.
 
 ## Failure discipline
 
 - Persist the selected route, provider, model, reasoning effort, latency and classified outcome for every model run.
 - Retry only transient transport failures within the configured bounded retry policy.
 - Never hide a failed external action by switching models.
-- Never enable an API route merely because a CLI allowance is exhausted.
+- Codex CLI routes are explicit opt-in development and evaluation routes; never auto-enable them in production.
 - Never duplicate provider keys or route priority in n8n.
 - Change the file-backed runtime configuration only through a controlled operator action, then restart the Brain and verify GET /health.
 
 ## Capacity boundary
 
-Codex CLI usage consumes a shared ChatGPT plan allowance whose effective request capacity varies with task complexity and context size. It is not a fixed production inference SLA and cannot be converted into a defensible concurrent-customer number from the plan price alone.
+Provider API routes are the production default and must be sized from measured RPM, TPM, latency, error, and load-test evidence.
 
-Use Codex CLI routes for development, evaluations and intentionally bounded internal traffic. Size production customer traffic from provider API RPM, TPM, latency and load-test evidence. Check current Codex allowance with the CLI status command before a test run.
+Codex CLI routes are optional for development, evaluations, and intentionally bounded internal traffic. They are never automatic production fallbacks. Check current Codex allowance with the CLI status command before an explicitly enabled test run.
 
 ## Change procedure
 

@@ -1,7 +1,6 @@
 import "./telemetry.mjs";
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { fileURLToPath } from 'node:url';
 import {
@@ -11,6 +10,7 @@ import {
   resolveCommercialAction,
 } from './commercial-action-tool.mjs';
 import { deriveSemanticState } from './semantic-state.mjs';
+import { runModelProcess } from './model-process-runner.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = process.env.MODEL_ROUTES_CONFIG || path.join(root, 'config/model-routes.default.json');
@@ -339,13 +339,125 @@ async function writeJson(file, value) {
   await fs.writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 }
 
+const circuitStatePath =
+  process.env.MODEL_CIRCUIT_STATE_PATH || path.join(path.dirname(runtimePath), 'model-circuit-state.json');
+const circuitFailureThreshold = Math.max(1, Number(process.env.MODEL_CIRCUIT_FAILURE_THRESHOLD || 3));
+const circuitCooldownMs = Math.max(1000, Number(process.env.MODEL_CIRCUIT_COOLDOWN_MS || 60000));
+let circuitMutation = Promise.resolve();
+
+function normalizedCircuitEntry(entry = {}) {
+  return {
+    state: ['closed', 'open', 'half_open'].includes(entry.state) ? entry.state : 'closed',
+    consecutive_failures: Math.max(0, Number(entry.consecutive_failures || 0)),
+    opened_at: entry.opened_at || null,
+    retry_after: entry.retry_after || null,
+    probe_started_at: entry.probe_started_at || null,
+    last_error: String(entry.last_error || '').slice(0, 500),
+    updated_at: entry.updated_at || null,
+  };
+}
+
+function publicCircuitEntry(entry = {}) {
+  return {
+    ...normalizedCircuitEntry(entry),
+    failure_threshold: circuitFailureThreshold,
+    cooldown_ms: circuitCooldownMs,
+  };
+}
+
+async function mutateCircuitState(mutator) {
+  const operation = circuitMutation.then(async () => {
+    const state = await readJson(circuitStatePath, { routes: {} });
+    if (!state.routes || typeof state.routes !== 'object') state.routes = {};
+    const mutation = mutator(state) || {};
+    if (mutation.changed) await writeJson(circuitStatePath, state);
+    return mutation.result;
+  });
+  circuitMutation = operation.catch(() => {});
+  return operation;
+}
+
+async function acquireCircuit(route) {
+  return mutateCircuitState((state) => {
+    const entry = normalizedCircuitEntry(state.routes[route.id]);
+    const currentMs = Date.now();
+    const retryAfterMs = entry.retry_after ? Date.parse(entry.retry_after) : 0;
+    const probeStartedMs = entry.probe_started_at ? Date.parse(entry.probe_started_at) : 0;
+
+    if (entry.state === 'open' && retryAfterMs > currentMs) {
+      return { result: { allowed: false, entry: publicCircuitEntry(entry) } };
+    }
+
+    if (entry.state === 'half_open' && probeStartedMs + circuitCooldownMs > currentMs) {
+      return { result: { allowed: false, entry: publicCircuitEntry(entry) } };
+    }
+
+    if (entry.state === 'open' || entry.state === 'half_open') {
+      const updated = {
+        ...entry,
+        state: 'half_open',
+        probe_started_at: now(),
+        updated_at: now(),
+      };
+      state.routes[route.id] = updated;
+      return { changed: true, result: { allowed: true, entry: publicCircuitEntry(updated) } };
+    }
+
+    return { result: { allowed: true, entry: publicCircuitEntry(entry) } };
+  });
+}
+
+async function recordCircuitSuccess(route) {
+  return mutateCircuitState((state) => {
+    const updated = {
+      state: 'closed',
+      consecutive_failures: 0,
+      opened_at: null,
+      retry_after: null,
+      probe_started_at: null,
+      last_error: '',
+      updated_at: now(),
+    };
+    state.routes[route.id] = updated;
+    return { changed: true, result: publicCircuitEntry(updated) };
+  });
+}
+
+async function recordCircuitFailure(route, error) {
+  return mutateCircuitState((state) => {
+    const previous = normalizedCircuitEntry(state.routes[route.id]);
+    const failures = previous.consecutive_failures + 1;
+    const openImmediately = isAuthenticationError(error) || previous.state === 'half_open';
+    const shouldOpen = openImmediately || failures >= circuitFailureThreshold;
+    const currentMs = Date.now();
+    const updated = {
+      state: shouldOpen ? 'open' : 'closed',
+      consecutive_failures: failures,
+      opened_at: shouldOpen ? new Date(currentMs).toISOString() : null,
+      retry_after: shouldOpen ? new Date(currentMs + circuitCooldownMs).toISOString() : null,
+      probe_started_at: null,
+      last_error: String(error?.message || error).slice(0, 500),
+      updated_at: new Date(currentMs).toISOString(),
+    };
+    state.routes[route.id] = updated;
+    return { changed: true, result: publicCircuitEntry(updated) };
+  });
+}
+
 export async function getModelRoutes() {
-  const base = await readJson(configPath, { routes: [] });
-  const runtime = await readJson(runtimePath, null);
+  const [base, runtime, circuitState] = await Promise.all([
+    readJson(configPath, { routes: [] }),
+    readJson(runtimePath, null),
+    readJson(circuitStatePath, { routes: {} }),
+  ]);
   const source = runtime && Array.isArray(runtime.routes) ? runtime : base;
   return {
     routes: source.routes
-      .map((route) => ({ ...route, priority: Number(route.priority || 999) }))
+      .map((route) => ({
+        ...route,
+        priority: Number(route.priority || 999),
+        circuit_breaker: publicCircuitEntry(circuitState.routes?.[route.id]),
+      }))
       .sort((a, b) => a.priority - b.priority),
   };
 }
@@ -368,6 +480,9 @@ export async function setModelRoutes(next) {
       enabled: Boolean(route.enabled),
       priority: Number(route.priority),
       reasoning_effort: route.reasoning_effort || 'low',
+      ...(route.supports_reasoning === undefined
+        ? {}
+        : { supports_reasoning: Boolean(route.supports_reasoning) }),
     })),
     updated_at: now(),
   };
@@ -528,6 +643,20 @@ export function normalizeCommercialAction(raw) {
 function normalizeDecision(raw) {
   const profile = mergeContactProfiles(raw);
   const semanticState = deriveSemanticState(raw);
+  const candidateAction =
+    typeof raw.action === 'string' && ['reply', 'silent', 'escalate'].includes(raw.action)
+      ? raw.action
+      : null;
+  const shouldEscalate = raw.should_escalate === true || candidateAction === 'escalate';
+  const shouldReply = shouldEscalate || (
+    candidateAction === 'silent' ? false : raw.should_reply !== false
+  );
+  const escalationReason =
+    typeof raw.escalation_reason === 'string' && raw.escalation_reason.trim()
+      ? raw.escalation_reason.trim()
+      : shouldEscalate
+        ? 'model_requested_handoff'
+        : null;
   return {
     // Preserve schema-validated semantic and commercial planning fields across
     // draft, review, and execution passes. Normalized runtime fields below
@@ -536,14 +665,15 @@ function normalizeDecision(raw) {
     reply: typeof raw.reply === 'string' ? raw.reply.trim() : '',
     response_language: typeof raw.response_language === 'string' ? raw.response_language.trim() : '',
     reply_language_consistent: raw.reply_language_consistent === true,
-    should_reply: raw.should_reply !== false,
-    should_escalate: raw.should_escalate === true,
-    escalation_reason: typeof raw.escalation_reason === 'string' ? raw.escalation_reason.trim() : '',
+    action: shouldEscalate ? 'escalate' : shouldReply ? 'reply' : 'silent',
+    should_reply: shouldReply,
+    should_escalate: shouldEscalate,
+    escalation_reason: escalationReason,
     confidence: Math.max(0, Math.min(1, Number(raw.confidence || 0))),
     conversation_summary: typeof raw.conversation_summary === 'string' ? raw.conversation_summary.trim() : '',
     contact_profile: profile,
     contact_profile_patch: profile,
-    commercial_action: normalizeCommercialAction(raw.commercial_action ?? raw.action),
+    commercial_action: normalizeCommercialAction(raw.commercial_action),
     semantic_state: semanticState,
   };
 }
@@ -566,32 +696,19 @@ function effectiveModelTimeout(defaultMs) {
   return Math.max(1000, Math.min(requested, remaining));
 }
 
-function runProcess(command, args, input, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: root,
-      env: process.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('model process timed out'));
-    }, timeoutMs);
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(stdout);
-      else reject(new Error('model process exited ' + code + ': ' + stderr.slice(-2000)));
-    });
-    child.stdin.end(input);
+async function runProcess(command, args, input, timeoutMs) {
+  const result = await runModelProcess({
+    command,
+    args,
+    input,
+    cwd: root,
+    env: process.env,
+    timeoutMs,
+    graceMs: Number(process.env.MODEL_PROCESS_GRACE_MS || 1500),
+    maxStdoutBytes: Number(process.env.MODEL_PROCESS_MAX_STDOUT_BYTES || 1_048_576),
+    maxStderrBytes: Number(process.env.MODEL_PROCESS_MAX_STDERR_BYTES || 131_072),
   });
+  return typeof result === 'string' ? result : result.stdout;
 }
 
 async function callCodex(route, prompt) {
@@ -609,6 +726,88 @@ async function callCodex(route, prompt) {
   return runProcess(process.env.CODEX_BIN || 'codex', args, prompt, effectiveModelTimeout(180000));
 }
 
+import { readFileSync } from 'node:fs';
+import Ajv2020 from 'ajv/dist/2020.js';
+
+const brainDecisionSchema = JSON.parse(
+  readFileSync(new URL('../schemas/brain-decision.schema.json', import.meta.url), 'utf8'),
+);
+const validateBrainDecision = new Ajv2020({ allErrors: true, strict: false }).compile(brainDecisionSchema);
+
+export function reconcileCommercialTransition(rawDecision) {
+  const selectedAction = rawDecision?.commercial_action?.action_id || null;
+  return {
+    ...rawDecision,
+    commercial_next_step: {
+      ...rawDecision.commercial_next_step,
+      action_required: selectedAction !== null,
+      action_id: selectedAction,
+    },
+  };
+}
+
+export function assertCommercialTransitionConsistency(rawDecision) {
+  const nextStep = rawDecision?.commercial_next_step || {};
+  const selectedAction = rawDecision?.commercial_action?.action_id || null;
+  const actionRequired = nextStep.action_required;
+  const declaredAction = nextStep.action_id ?? null;
+  const consistent = actionRequired === true
+    ? Boolean(selectedAction && declaredAction && selectedAction === declaredAction)
+    : actionRequired === false
+      ? selectedAction === null && declaredAction === null
+      : false;
+
+  if (!consistent) {
+    const error = new Error('Model commercial transition contract is inconsistent');
+    error.code = 'model_contract_invalid';
+    error.details = [{
+      path: '/commercial_next_step',
+      message: 'action_required, action_id, and commercial_action.action_id must agree',
+    }];
+    throw error;
+  }
+  return rawDecision;
+}
+
+export function assertRawDecisionContract(rawDecision) {
+  if (validateBrainDecision(rawDecision)) {
+    // Preserve the model's declared commercial transition until the bounded
+    // structural-review pass has inspected it. Reconciliation here used to
+    // erase contradictions (for example proposal_ready with no selected
+    // action), which prevented the corrective pass from ever seeing them.
+    return rawDecision;
+  }
+
+  const details = (validateBrainDecision.errors || [])
+      .slice(0, 64)
+    .map((error) => `${error.instancePath || '/'} ${error.keyword} ${error.message || 'invalid'}`)
+    .join('; ');
+  const error = new Error(`model_contract_invalid:${details || 'schema validation failed'}`);
+  error.code = 'model_contract_invalid';
+  throw error;
+}
+
+export function buildOpenAIResponseRequest(route, prompt) {
+  const body = {
+    model: route.model,
+    input: prompt,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'brain_decision',
+        schema: brainDecisionSchema,
+        strict: true,
+      },
+    },
+  };
+
+  if (route.supports_reasoning === true) {
+    body.reasoning = { effort: route.reasoning_effort || 'low' };
+  }
+
+  return body;
+}
+
 async function callOpenAI(route, prompt) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is missing');
   const response = await fetch('https://api.openai.com/v1/responses', {
@@ -617,18 +816,17 @@ async function callOpenAI(route, prompt) {
       authorization: 'Bearer ' + process.env.OPENAI_API_KEY,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      model: route.model,
-      input: prompt,
-      ...(route.supports_reasoning === false
-        ? {}
-        : { reasoning: { effort: route.reasoning_effort || 'low' } }),
-      text: { format: { type: 'json_object' } },
-    }),
+    body: JSON.stringify(buildOpenAIResponseRequest(route, prompt)),
       signal: AbortSignal.timeout(effectiveModelTimeout(180000)),
   });
   const body = await response.json();
-  if (!response.ok) throw new Error('OpenAI ' + response.status + ': ' + JSON.stringify(body).slice(0, 1500));
+  if (!response.ok) {
+    const error = new Error('OpenAI ' + response.status + ': ' + JSON.stringify(body).slice(0, 1500));
+    error.status = response.status;
+    error.provider = 'openai';
+    error.code = body?.error?.code || `HTTP_${response.status}`;
+    throw error;
+  }
   return body.output_text || body.output?.flatMap((item) => item.content || []).map((item) => item.text || '').join('') || '';
 }
 
@@ -662,7 +860,13 @@ async function callDeepSeekOnce(route, prompt, { repair = false } = {}) {
       )),
   });
   const body = await response.json();
-  if (!response.ok) throw new Error('DeepSeek ' + response.status + ': ' + JSON.stringify(body).slice(0, 1500));
+  if (!response.ok) {
+    const error = new Error('DeepSeek ' + response.status + ': ' + JSON.stringify(body).slice(0, 1500));
+    error.status = response.status;
+    error.provider = 'deepseek';
+    error.code = body?.error?.code || `HTTP_${response.status}`;
+    throw error;
+  }
   const choice = body.choices?.[0];
   const content = choice?.message?.content;
   const finishReason = String(choice?.finish_reason || '');
@@ -706,11 +910,16 @@ Durable contact-memory extraction contract:
       });
       previousOutput = output;
       previousDecision = extractJson(output);
-      validateDecisionContract(normalizeDecision(previousDecision));
+      const validatedDecision = assertRawDecisionContract(previousDecision);
+      validateDecisionContract(normalizeDecision(validatedDecision));
       return output;
     } catch (error) {
       lastError = error;
-      if (!retryable(error) || attempt >= attempts) throw error;
+      const contractRepairable = (
+        error?.code === 'model_contract_invalid'
+        || error?.code === 'MODEL_CONTRACT_ERROR'
+      );
+      if ((!contractRepairable && !retryable(error)) || attempt >= attempts) throw error;
       const previousResponse = (
         previousDecision
           ? JSON.stringify(previousDecision)
@@ -764,10 +973,21 @@ export function isQuotaExhaustionError(error) {
   return /quota|usage limit|rate.?limit|too many requests|insufficient_quota|resource_exhausted|0 (?:weighted )?tokens? left|limit resets?/.test(message);
 }
 
+function isAuthenticationError(error) {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status ?? 0);
+  if (status === 401 || status === 403) return true;
+  const message = String(error?.message || error).toLowerCase();
+  return /(?:401|403)|invalid (?:api )?key|invalid authentication|authentication failed|unauthorized|forbidden/.test(message);
+}
+
 function retryable(error) {
   if (error?.code === 'MODEL_CONTRACT_ERROR') return true;
   const message = String(error?.message || error).toLowerCase();
-  return /quota|rate.?limit|too many requests|429|usage limit|capacity|overloaded|temporarily unavailable|timed out|timeout|econnreset|502|503|504|model did not return a valid json object/.test(message);
+  return /quota|rate.?limit|too many requests|429|usage limit|capacity|overloaded|temporarily unavailable|timed out|timeout|econnreset|fetch failed|network|socket|502|503|504|model did not return a valid json object/.test(message);
+}
+
+function recoverableRouteError(error) {
+  return retryable(error) || isAuthenticationError(error);
 }
 
 async function updateHealth(route, status, detail) {
@@ -789,6 +1009,22 @@ export async function routeModel(prompt, hooks = {}) {
   const failures = [];
   for (let index = 0; index < enabled.length; index += 1) {
     const route = enabled[index];
+    const circuit = await acquireCircuit(route);
+    if (!circuit.allowed) {
+      const error = new Error(`model circuit is open for ${route.id} until ${circuit.entry.retry_after || 'a probe is available'}`);
+      error.code = 'MODEL_CIRCUIT_OPEN';
+      failures.push({
+        route: route.id,
+        model: route.model,
+        error: error.message,
+        retryable: true,
+        fallback: index < enabled.length - 1,
+        latencyMs: 0,
+      });
+      await updateHealth(route, 'circuit_open', error.message);
+      if (hooks.onFailure) await hooks.onFailure(route, error, index < enabled.length - 1);
+      continue;
+    }
     const startedAt = Date.now();
     try {
       let output;
@@ -796,18 +1032,19 @@ export async function routeModel(prompt, hooks = {}) {
       else if (route.provider === 'openai') output = await callOpenAI(route, prompt);
       else if (route.provider === 'deepseek') output = await callDeepSeek(route, prompt);
       else throw new Error('unsupported provider: ' + route.provider);
-      const decision = validateDecisionContract(normalizeDecision(extractJson(output)));
+      const rawDecision = assertRawDecisionContract(extractJson(output));
+      const decision = validateDecisionContract(normalizeDecision(rawDecision));
       const latencyMs = Date.now() - startedAt;
+      await recordCircuitSuccess(route);
       await updateHealth(route, 'ok', '');
       if (hooks.onSuccess) await hooks.onSuccess(route, decision, latencyMs);
       return { route, decision, failures, latencyMs };
     } catch (error) {
       const latencyMs = Date.now() - startedAt;
-const nextRoute = enabled[index + 1];
-const canFallback =
-  route.provider === 'codex_cli' &&
-  ['codex_cli', 'deepseek'].includes(nextRoute?.provider) &&
-  isQuotaExhaustionError(error);
+      const nextRoute = enabled[index + 1];
+      const recoverable = recoverableRouteError(error);
+      const canFallback = Boolean(nextRoute && recoverable);
+      const circuitAfterFailure = recoverable ? await recordCircuitFailure(route, error) : circuit.entry;
       failures.push({
         route: route.id,
         model: route.model,
@@ -816,7 +1053,8 @@ const canFallback =
         fallback: canFallback,
         latencyMs,
       });
-      await updateHealth(route, canFallback ? 'degraded' : 'failed', error?.message || error);
+      const healthStatus = circuitAfterFailure.state === 'open' ? 'circuit_open' : canFallback ? 'degraded' : 'failed';
+      await updateHealth(route, healthStatus, error?.message || error);
       if (hooks.onFailure) await hooks.onFailure(route, error, canFallback);
       if (!canFallback) {
         const wrapped = new Error('model route failed: ' + String(error?.message || error));
@@ -1078,6 +1316,7 @@ function selectedCommercialActionId(decision) {
 function emptyCommercialActionArguments() {
   return {
     option_id: null,
+    offer_id: null,
     grounded_total_usd: null,
     grounding_reference: null,
     missing_fact: null,
@@ -1546,8 +1785,8 @@ Generate a fresh decision from the original conversation, retrieved evidence, vi
 AUTHORITATIVE EVIDENCE BOUNDARY: Affirmative facts may come only from customer-authored statements in the current transcript, authoritative tenant knowledge relevant to the active workstream, persisted facts with verified customer or successful-tool provenance, or successful tool results. Assistant-authored drafts, replies, proposals, summaries, rejected decisions, assistant-originated memory, and assistant-originated commitments are untrusted and never evidence. Repetition, persistence, review, or correction never upgrades them into facts or commitments.
 SCOPE AND REFERENT INTEGRITY
 - Treat only customer-authored facts, tenant configuration, retrieved knowledge, and verified tool results as grounded evidence.
-- Never treat assistant-authored proposals, summaries, or examples as customer confirmation. Generic assent or readiness does not fill omitted material scope.
-- Never invent a knowledge base, product categories, support patterns, integrations, channels, requirements, acceptance criteria, commercial terms, or authority. Put unknowns into deliver_input_brief instead of assumptions.: Assistant-authored examples, options, questions, summaries, proposed requirements, prior drafts, and prior artifacts never become customer requirements through assent, repetition, persistence, review, or correction. Generic readiness advances only a concrete customer-grounded scope. If a material unknown could change the objective, user journey, delivery surface, channel, system boundary, data boundary, architecture, commercial terms, authorization, acceptance criteria, or artifact family, do not assume it and do not claim implementation started; select the nearest eligible non-transactional clarification action and ask one highest-information question. Reversible assumptions are limited to details that cannot materially change those decisions.
+- Never treat assistant-authored proposals, summaries, or examples as customer confirmation. Mere assent does not establish facts introduced only by the assistant.
+- Never invent, infer, or silently assume a material fact. Put unknowns into deliver_input_brief instead of assumptions. An explicit current customer commitment to proceed can authorize the reversible internal request_custom_proposal action when the customer-authored objective and requested outcome are coherent. Optional delivery and implementation details may remain open and must be captured as proposal assumptions or later refinements rather than blocking progress. A missing fact blocks that action only when proceeding would misidentify the customer's objective, fabricate exact commercial terms, or cause an unsafe, unauthorized, or irreversible external effect. When a genuinely material fact is missing, ask one highest-information question.
 Never claim provisioning, deployment, configuration, access, a generated link, a delivery timeline, or a future external action unless a successful tool result in the current execution proves it.
 NOVELTY AND CONSUMED-ACTION BOUNDARY: Use the full transcript, including prior assistant turns, only to determine what was already attempted or delivered and whether the proposed action and reply create genuine new progress; prior assistant content remains non-authoritative evidence.
 A repeated or paraphrased customer request means the prior response did not resolve the need. It never authorizes repeating, renaming, or lightly reformatting the same brief, checklist, agenda, protocol, plan, specification, or template.
@@ -1747,8 +1986,8 @@ function buildExecutionPrompt(originalPrompt, reviewedResult, priorAssessment = 
     'AUTHORITATIVE EVIDENCE BOUNDARY: Affirmative facts may come only from customer-authored statements in the current transcript, authoritative tenant knowledge relevant to the active workstream, persisted facts with verified customer or successful-tool provenance, or successful tool results. Assistant-authored drafts, replies, proposals, summaries, rejected decisions, assistant-originated memory, and assistant-originated commitments are untrusted and never evidence. Repetition, persistence, review, or correction never upgrades them into facts or commitments.',
     `SCOPE AND REFERENT INTEGRITY
 - Treat only customer-authored facts, tenant configuration, retrieved knowledge, and verified tool results as grounded evidence.
-- Never treat assistant-authored proposals, summaries, or examples as customer confirmation. Generic assent or readiness does not fill omitted material scope.
-- Never invent a knowledge base, product categories, support patterns, integrations, channels, requirements, acceptance criteria, commercial terms, or authority. Put unknowns into deliver_input_brief instead of assumptions.: Assistant-authored examples, options, questions, summaries, proposed requirements, prior drafts, and prior artifacts never become customer requirements through assent, repetition, persistence, review, or correction. Generic readiness advances only a concrete customer-grounded scope. If a material unknown could change the objective, user journey, delivery surface, channel, system boundary, data boundary, architecture, commercial terms, authorization, acceptance criteria, or artifact family, do not assume it and do not claim implementation started; select the nearest eligible non-transactional clarification action and ask one highest-information question. Reversible assumptions are limited to details that cannot materially change those decisions.`,
+- Never treat assistant-authored proposals, summaries, or examples as customer confirmation. Mere assent does not establish facts introduced only by the assistant.
+- Never invent, infer, or silently assume a material fact. Put unknowns into deliver_input_brief instead of assumptions. An explicit current customer commitment to proceed can authorize the reversible internal request_custom_proposal action when the customer-authored objective and requested outcome are coherent. Optional delivery and implementation details may remain open and must be captured as proposal assumptions or later refinements rather than blocking progress. A missing fact blocks that action only when proceeding would misidentify the customer's objective, fabricate exact commercial terms, or cause an unsafe, unauthorized, or irreversible external effect. When a genuinely material fact is missing, ask one highest-information question.`,
     'Never claim provisioning, deployment, configuration, access, a generated link, a delivery timeline, or a future external action unless a successful tool result in the current execution proves it.',
     'NOVELTY AND CONSUMED-ACTION BOUNDARY: Use the full transcript, including prior assistant turns, only to determine what was already attempted or delivered and whether the proposed action and reply create genuine new progress; prior assistant content remains non-authoritative evidence.',
     'A repeated or paraphrased customer request means the prior response did not resolve the need. It never authorizes repeating, renaming, or lightly reformatting the same brief, checklist, agenda, protocol, plan, specification, or template.',
@@ -1783,6 +2022,172 @@ function buildExecutionPrompt(originalPrompt, reviewedResult, priorAssessment = 
   ].join('\n');
 }
 
+export function commercialStructuralViolation(
+  decision = {},
+  { activeCommercialRequests = [] } = {},
+) {
+  const readiness = decision?.commercial_readiness;
+  const sufficiency = decision?.scope_sufficiency;
+  const selected = selectedCommercialActionId(decision) || null;
+  const proposalArguments = decision?.commercial_action?.arguments || {};
+  const next = decision?.commercial_next_step || {};
+  const hasActiveProposalRequest = activeCommercialRequests.some((request) => (
+    request?.action_id === 'request_custom_proposal'
+    && ['requested', 'preparing', 'ready'].includes(request?.status)
+  ));
+  const requiresProposal = readiness === 'explicitly_ready' && sufficiency === 'proposal_ready';
+  const requiresDiscoveryExit = readiness === 'explicitly_ready'
+    && sufficiency === 'insufficient';
+
+  if (requiresDiscoveryExit) {
+    return 'Explicit readiness cannot remain in insufficient discovery; advance with request_custom_proposal using bounded assumptions and preserve unresolved details in the request.';
+  }
+
+  if (hasActiveProposalRequest && selected === 'request_custom_proposal') {
+    return 'An active custom proposal request already exists and must be reused instead of creating another request.';
+  }
+
+  if (
+    selected === 'request_custom_proposal'
+    && (readiness !== 'explicitly_ready' || sufficiency !== 'proposal_ready')
+  ) {
+    return 'request_custom_proposal requires explicit current-turn customer commitment and proposal-ready confirmed scope; exploratory interest or a request for information is not authorization.';
+  }
+
+  if (selected === 'request_custom_proposal') {
+    const customerCommitment = proposalArguments.customer_commitment;
+    const authorizationScope = proposalArguments.authorization_scope;
+    const authorizationEvidence = proposalArguments.authorization_evidence;
+    const missingFact = proposalArguments.missing_fact;
+    const hasBoundedCommitment = typeof customerCommitment === 'string'
+      && customerCommitment.trim().length > 0
+      && customerCommitment.trim().length <= 1_000;
+    const hasBoundedScope = typeof authorizationScope === 'string'
+      && authorizationScope.trim().length >= 8
+      && authorizationScope.trim().length <= 2_000;
+    const hasBoundedEvidence = typeof authorizationEvidence === 'string'
+      && authorizationEvidence.trim().length > 0
+      && authorizationEvidence.trim().length <= 1_000;
+    const hasMissingFact = typeof missingFact === 'string' && missingFact.trim().length > 0;
+    if (
+      !hasBoundedCommitment
+      || !hasBoundedScope
+      || proposalArguments.authorization_is_explicit !== true
+      || proposalArguments.authorization_is_unambiguous !== true
+      || !hasBoundedEvidence
+      || hasMissingFact
+    ) {
+      return 'request_custom_proposal must include bounded customer_commitment and authorization_scope, explicit and unambiguous authorization booleans, current-turn authorization_evidence, and no missing_fact.';
+    }
+  }
+
+  if (
+    requiresProposal
+    && hasActiveProposalRequest
+    && (selected !== null || next.action_required !== false || next.action_id !== null)
+  ) {
+    return 'Explicit readiness with an active custom proposal request must continue that lifecycle without selecting a duplicate action.';
+  }
+  if (next.action_required === true && (!selected || next.action_id !== selected)) {
+    return 'A required commercial next step must match the selected commercial action.';
+  }
+  if (next.action_required === false && (selected !== null || next.action_id !== null)) {
+    return 'A non-required commercial next step cannot include a selected commercial action.';
+  }
+  return null;
+}
+
+function boundedIntegrityText(value, maxLength = 1200) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+export function repairReversibleProposalIntegrity(
+  decision = {},
+  {
+    activeCommercialRequests = [],
+    latestInboundText = '',
+  } = {},
+) {
+  const hasActiveProposalRequest = activeCommercialRequests.some((request) => (
+    request?.action_id === 'request_custom_proposal'
+    && ['requested', 'preparing', 'ready'].includes(request?.status)
+  ));
+  const selectedActionId = selectedCommercialActionId(decision);
+  if (
+    decision?.commercial_readiness !== 'explicitly_ready'
+    || decision?.scope_sufficiency !== 'proposal_ready'
+    || hasActiveProposalRequest
+    || (selectedActionId && selectedActionId !== 'request_custom_proposal')
+  ) {
+    return null;
+  }
+
+  const authorizationEvidence = boundedIntegrityText(latestInboundText);
+  const confirmedScope = boundedIntegrityText(
+    decision?.solution_scope?.customer_goal
+      || decision?.commercial_next_step?.customer_outcome,
+  );
+  if (!authorizationEvidence || !confirmedScope) return null;
+
+  const previousAction = decision?.commercial_action || {};
+  const previousArguments = previousAction?.arguments || {};
+  const previousNextStep = decision?.commercial_next_step || {};
+  const repairedDecision = {
+    ...decision,
+    commercial_action: {
+      ...previousAction,
+      selected: true,
+      action_id: 'request_custom_proposal',
+      selection_reason: boundedIntegrityText(previousAction?.selection_reason)
+        || 'Explicit customer commitment and proposal-ready scope require one durable internal request.',
+      requested_commitment: authorizationEvidence,
+      arguments: {
+        ...previousArguments,
+        offer_id: previousArguments?.offer_id ?? null,
+        option_id: previousArguments?.option_id ?? null,
+        grounded_total_usd: previousArguments?.grounded_total_usd ?? null,
+        grounding_reference: previousArguments?.grounding_reference ?? null,
+        missing_fact: null,
+        customer_commitment: authorizationEvidence,
+        authorization_is_explicit: true,
+        authorization_is_unambiguous: true,
+        authorization_evidence: authorizationEvidence,
+        authorization_scope: confirmedScope,
+      },
+    },
+    commercial_next_step: {
+      ...previousNextStep,
+      action_required: true,
+      action_id: 'request_custom_proposal',
+      stage: 'commit',
+      customer_outcome: boundedIntegrityText(previousNextStep?.customer_outcome) || confirmedScope,
+      recommended_step: boundedIntegrityText(previousNextStep?.recommended_step)
+        || 'Create or reuse the single durable proposal request for the confirmed scope.',
+      why_now: boundedIntegrityText(previousNextStep?.why_now)
+        || 'The customer has explicitly committed and the proposal scope is sufficient.',
+      customer_commitment: authorizationEvidence,
+      seller_commitment: boundedIntegrityText(previousNextStep?.seller_commitment)
+        || 'Prepare the grounded proposal without requesting another confirmation.',
+      payment_request: previousNextStep?.payment_request || {
+        percentage: null,
+        amount: null,
+        currency: null,
+        credits: null,
+        url: null,
+        instructions: null,
+      },
+      grounding_refs: Array.isArray(previousNextStep?.grounding_refs)
+        ? previousNextStep.grounding_refs
+        : [],
+    },
+  };
+
+  return commercialStructuralViolation(repairedDecision, { activeCommercialRequests })
+    ? null
+    : repairedDecision;
+}
+
 async function routeModelWithReviewCore(prompt, hooks = {}) {
   const commercialPrompt = `${await appendCommercialActionContext(prompt)}
 
@@ -1790,7 +2195,7 @@ async function routeModelWithReviewCore(prompt, hooks = {}) {
 
 ${semanticStateConsistencyPrompt()}
 
-Use commercial_action only for a real enabled external side effect from the authoritative catalog. Ordinary dialogue, discovery, clarification, recommendations, objection handling, sales progression, profile reasoning, and escalation reasoning must return the canonical not-selected object with selected=false and action_id=null. For an external action, use exact catalog action_id and option_id values and include authorization_is_explicit, authorization_is_unambiguous, authorization_evidence, and authorization_scope. Set both authorization booleans true only when the newest inbound customer message explicitly and unambiguously authorizes that exact action and option; authorization_evidence must quote or tightly reproduce that newest-message evidence, and authorization_scope must identify the exact authorized amount and action. Never emit a legacy action/type/payload object or a dialogue-stage pseudo-action. For any action requiring an exact grounded amount, include grounding_reference as an exact verbatim excerpt from the authoritative retrieved context that contains that amount; never derive or paraphrase it.
+Use commercial_action only for a real enabled side effect from the authoritative catalog, including the reversible durable internal request_custom_proposal action. Ordinary dialogue, discovery, clarification, recommendations, objection handling, sales progression, profile reasoning, and escalation reasoning must return the canonical not-selected object with selected=false and action_id=null. For request_custom_proposal, an explicit newest-message commitment to proceed with a coherent customer-grounded objective is authorization; option_id may be null when the catalog allows it, and optional delivery details may remain open. Include authorization_is_explicit, authorization_is_unambiguous, authorization_evidence, and authorization_scope. Set missing_fact only when proceeding would misidentify the objective, fabricate exact commercial terms, or trigger an unsafe, unauthorized, or irreversible effect. For payment or any other external mutation, use exact catalog identifiers and require explicit newest-message authorization for the exact action, option, and amount where applicable. Never emit a legacy action/type/payload object or a dialogue-stage pseudo-action. For any action requiring an exact grounded amount, include grounding_reference as an exact verbatim excerpt from the authoritative retrieved context that contains that amount; never derive or paraphrase it.
 
 Reason over the complete current conversation, persisted semantic memory, retrieved authoritative knowledge, and tool results. Do not use keyword intent trees, language branches, scripted funnels, rigid stage machines, or canned sales templates.
 
@@ -1803,7 +2208,7 @@ Resolve the newest inbound conversational act before applying sales readiness or
 Treat a materially distinct newest request, need, or workstream as independently actionable even when earlier context is related. Address it on its own terms first with a direct acknowledgment or answer plus concise useful request-specific orientation or progress. Earlier context may refine the response, but it cannot become a prerequisite, the sole explanatory frame, or a reason to withhold useful handling unless the customer explicitly makes that dependency necessary. Do not merely paraphrase the request and ask for scope; provide substantive orientation first, then ask at most one action-aligned high-information question when input is genuinely useful.
 When the newest customer act asks what is needed to scope, start, or proceed, first deliver a concise customer-specific prioritized input brief: minimum inputs needed now, details that can wait, already-known facts, and the immediate result those inputs unlock. Treat that brief as the visible-progress artifact. Ask at most one unresolved highest-information question afterward; never return a question-only reply and never ask for a fact already supplied.
 
-Select a commercial action only for a grounded, enabled external side effect. Never encode a conversational move, discovery question, recommendation, objection response, sales stage, profile update, or escalation decision as an action. A paid audit is never a default. Never invent pricing, requirements, capabilities, promises, or prior context. Transactional actions require explicit and unambiguous authorization for the exact action and option in the newest inbound message.
+Select a commercial action only for a grounded, enabled side effect from the authoritative catalog, including a durable internal proposal request. Never encode a conversational move, discovery question, recommendation, objection response, sales stage, profile update, or escalation decision as an action. A paid audit is never a default. Never invent pricing, requirements, capabilities, promises, or prior context. The reversible request_custom_proposal action requires explicit current commitment to proceed with a coherent customer-grounded objective, not a complete delivery design. Payment or any other external mutation requires explicit and unambiguous authorization for the exact action, option, and amount where applicable in the newest inbound message.
 Treat contact_profile as a sparse operational patch: include customer identity and contact facts explicitly stated in the conversation; do not erase previously grounded facts with null, blank, or empty values; never invent contact data.
 SHORT ASSENT: A short acknowledgement confirms only one uniquely scoped proposition stated immediately before it. It does not adopt assistant-authored examples, options, questions, summaries, proposed requirements, or omitted scope; choose among alternatives; or authorize payment. If any material scope decision remains unresolved, ask one highest-information clarification question without repeating a menu.
 
@@ -1814,153 +2219,100 @@ Catalog and reference prices are evidence only for the semantically matching act
 Return a natural, individualized reply that answers the immediate need and advances one meaningful step. The customer-facing reply must contain at most one focused question; combine related unknowns naturally and never stack separate confirmation questions.`;
 
   const draft = await routeModel(commercialPrompt, hooks);
-  const draftCommercialAction = await resolveCommercialAction(
-    draft.decision.commercial_action,
-    prompt,
-  );
-
-  const runtimeReviewEnabled = !/^(0|false|no|off)$/i.test(
-    String(process.env.MODEL_RUNTIME_REVIEW_ENABLED || 'true'),
-  );
-  if (!runtimeReviewEnabled) {
-    return {
-      ...draft,
-      commercialAction: draftCommercialAction,
-      independentReview: {
-        performed: false,
-        reason: 'disabled_for_live_runtime',
-        draftRoute: draft.route?.id || null,
-        draftModel: draft.route?.model || null,
-      },
-    };
-  }
-
-  try {
-    const reviewPrompt = appendCommercialActionValidation(
-      buildReviewPrompt(commercialPrompt, draft),
-      draftCommercialAction,
+  const draftCommercialAction = draft.decision?.commercial_action
+    ? await resolveCommercialAction(draft.decision.commercial_action, commercialPrompt, {
+      latestInboundText: hooks?.latestInboundText || '',
+    })
+    : null;
+  const draftStructuralViolation = commercialStructuralViolation(draft.decision, {
+    activeCommercialRequests: hooks?.activeCommercialRequests || [],
+  });
+  const draftActionViolation =
+    draft.decision?.commercial_action && draftCommercialAction?.valid === false
+      ? `commercial_action_invalid:${draftCommercialAction.reason || draftCommercialAction.validation_error || 'validation_failed'}`
+      : null;
+  let violation = draftStructuralViolation || draftActionViolation;
+  const repairedDecision = draftStructuralViolation
+    ? repairReversibleProposalIntegrity(draft.decision, {
+      activeCommercialRequests: hooks?.activeCommercialRequests || [],
+      latestInboundText: hooks?.latestInboundText || '',
+    })
+    : null;
+  if (repairedDecision) {
+    const repairedCommercialAction = await resolveCommercialAction(
+      repairedDecision.commercial_action,
+      commercialPrompt,
+      { latestInboundText: hooks?.latestInboundText || '' },
     );
-    let reviewed = await routeModel(reviewPrompt, hooks);
-    let reviewedCommercialAction = await resolveCommercialAction(
-      reviewed.decision.commercial_action,
-      prompt,
-    );
-
-    preserveContactProfile(reviewed.decision, draft.decision);
-
-    if (!reviewedCommercialAction.valid) {
-      const recoveryPrompt = appendCommercialActionValidation(
-        `${buildReviewPrompt(commercialPrompt, reviewed)}
-
-# Final commercial-action recovery
-
-The prior response still contains an invalid or incomplete commercial action. Correct it now. Return either a fully valid canonical commercial_action using exact enabled action_id and option_id values from authoritative context, or the canonical not-selected action with action_id null. If no valid action can be selected, remove all payment, checkout, booking, external-action, and completion claims from the customer-facing reply and continue naturally with at most one specific unresolved question. Never mention validation, rejection, internal tools, system behavior, or a human review caused by internal validation.`,
-        reviewedCommercialAction,
-      );
-      const recovered = await routeModel(recoveryPrompt, hooks);
-      preserveContactProfile(
-        recovered.decision,
-        draft.decision,
-        reviewed.decision,
-      );
-      const recoveredCommercialAction = await resolveCommercialAction(
-        recovered.decision.commercial_action,
-        prompt,
-      );
-
-      if (!recoveredCommercialAction.valid) {
-        const failure = new Error(
-          `Commercial response correction failed closed: ${recoveredCommercialAction.validation_error || 'final recovery returned an invalid commercial action'}`,
-        );
-        failure.code = 'COMMERCIAL_CORRECTION_FAILED';
-        throw failure;
-      }
-
-      reviewed = {
-        ...recovered,
-        failures: [...(reviewed.failures || []), ...(recovered.failures || [])],
-        latencyMs: Number(reviewed.latencyMs || 0) + Number(recovered.latencyMs || 0),
-      };
-      reviewedCommercialAction = recoveredCommercialAction;
-    }
-
-    try {
-      const executionPrompt = appendCommercialActionExecution(
-        buildExecutionPrompt(commercialPrompt, reviewed),
-        reviewedCommercialAction,
-      );
-      const executed = await routeModel(executionPrompt, hooks);
-      executed.decision.commercial_action = reviewed.decision.commercial_action;
-  preserveContactProfile(
-        executed.decision,
-        draft.decision,
-        reviewed.decision,
-      );
-
-      const executedCommercialAction = await resolveCommercialAction(
-        executed.decision.commercial_action,
-        prompt,
-      );
-      if (!executedCommercialAction.valid) {
-        throw new Error(
-          executedCommercialAction.validation_error
-            || 'final execution returned an invalid commercial action',
-        );
-      }
-
+    if (repairedCommercialAction?.valid !== false) {
       return {
-        ...executed,
-        failures: [
-          ...(draft.failures || []),
-          ...(reviewed.failures || []),
-          ...(executed.failures || []),
-        ],
-        latencyMs: Number(draft.latencyMs || 0)
-          + Number(reviewed.latencyMs || 0)
-          + Number(executed.latencyMs || 0),
-        commercialAction: executedCommercialAction,
+        ...draft,
+        decision: repairedDecision,
+        commercialAction: repairedCommercialAction,
         independentReview: {
-          performed: true,
-          correctionPerformed: JSON.stringify(draft.decision) !== JSON.stringify(reviewed.decision),
-          draftRoute: draft.route?.id || null,
-          draftModel: draft.route?.model || null,
-          reviewRoute: reviewed.route?.id || null,
-          reviewModel: reviewed.route?.model || null,
-          executionPerformed: true,
-          executionAttempts: 1,
-          executionRoute: executed.route?.id || null,
-          executionModel: executed.route?.model || null,
+          performed: false,
+          correctionPerformed: true,
+          reason: 'deterministic_reversible_integrity_repair',
+          initialViolation: violation,
         },
       };
-    } catch (executionError) {
-      const failure = new Error(
-        `Commercial response correction failed closed: ${String(executionError?.message || executionError)}`,
-        { cause: executionError },
-      );
-      failure.code = 'COMMERCIAL_CORRECTION_FAILED';
-      throw failure;
     }
-  } catch (error) {
-    if (error?.code === 'COMMERCIAL_CORRECTION_FAILED') {
-      throw error;
-    }
+    violation = `commercial_action_invalid:${repairedCommercialAction.reason || repairedCommercialAction.validation_error || 'validation_failed'}`;
+  }
+  if (!violation) {
     return {
       ...draft,
-      failures: [
-        ...(draft.failures || []),
-        ...(Array.isArray(error?.failures) ? error.failures : []),
-      ],
       commercialAction: draftCommercialAction,
       independentReview: {
         performed: false,
-        draftRoute: draft.route?.id || null,
-        draftModel: draft.route?.model || null,
-        error: String(error?.message || error).slice(0, 500),
+        correctionPerformed: false,
+        reason: 'single_turn_structurally_valid',
       },
     };
   }
-}
 
+  const correctionPrompt = [
+    commercialPrompt,
+    '',
+    'STRUCTURAL/ACTION CONTRACT REPAIR (one bounded retry only):',
+    `Violation: ${violation}`,
+    'Return a complete replacement JSON decision that preserves the established customer language and grounded facts while satisfying both the structural and commercial-action contracts. Do not add another confirmation when readiness and scope are already sufficient.',
+    'When the customer is explicitly ready, optional discovery details must remain bounded assumptions or unresolved request details rather than blocking the reversible request_custom_proposal action.',
+      `Previous decision: ${JSON.stringify(draft.decision).slice(0, 6000)}`,
+  ].join('\n');
+  const corrected = await routeModel(correctionPrompt, hooks);
+  const correctedCommercialAction = corrected.decision?.commercial_action
+    ? await resolveCommercialAction(corrected.decision.commercial_action, commercialPrompt, {
+      latestInboundText: hooks?.latestInboundText || '',
+    })
+    : null;
+  const correctedStructuralViolation = commercialStructuralViolation(corrected.decision, {
+    activeCommercialRequests: hooks?.activeCommercialRequests || [],
+  });
+  const correctedActionViolation =
+    corrected.decision?.commercial_action && correctedCommercialAction?.valid === false
+      ? `commercial_action_invalid:${correctedCommercialAction.reason || correctedCommercialAction.validation_error || 'validation_failed'}`
+      : null;
+  const remainingViolation = correctedStructuralViolation || correctedActionViolation;
+  if (remainingViolation) {
+    const error = new Error(`Commercial decision remained structurally invalid after one correction: ${remainingViolation}`);
+    error.code = 'COMMERCIAL_STRUCTURAL_CORRECTION_FAILED';
+    throw error;
+  }
+
+  return {
+    ...corrected,
+    latencyMs: Number(draft.latencyMs || 0) + Number(corrected.latencyMs || 0),
+    failures: [...(draft.failures || []), ...(corrected.failures || [])],
+    commercialAction: correctedCommercialAction,
+    independentReview: {
+      performed: false,
+      correctionPerformed: true,
+      reason: 'structural_or_action_contract_repair',
+      initialViolation: violation,
+    },
+  };
+}
 export function releaseTextOnlyAfterConformanceFailure(
   result,
   error,
@@ -1970,9 +2322,10 @@ export function releaseTextOnlyAfterConformanceFailure(
   const violations = Array.isArray(error?.violations)
     ? error.violations
     : [];
-  const safeReply = "I’m sorry, but I can’t provide a reliable answer from the current evidence. I’ve kept the conversation context so we can continue without repeating earlier details.";
+  const safeReply = String(result?.decision?.reply || '').trim();
   return {
     ...result,
+    shouldReply: Boolean(safeReply),
     decision: {
       ...(result?.decision || {}),
       reply: safeReply,
@@ -1991,7 +2344,7 @@ export function releaseTextOnlyAfterConformanceFailure(
       performed: true,
       passed: false,
       advisory: false,
-      releaseMode: 'safe_reply_fail_closed',
+        releaseMode: 'text_only_fail_safe',
       actionsBlocked: true,
       violations,
       error: String(error?.message || error).slice(0, 1000),
@@ -2000,13 +2353,13 @@ export function releaseTextOnlyAfterConformanceFailure(
 }
 
 export function hasCommercialActionSelection(result) {
-  return result?.decision?.commercial_action != null;
+  return selectedCommercialActionId(result?.decision) !== null;
 }
 
 async function routeModelWithReviewBounded(prompt, hooks = {}) {
   const coreResult = await routeModelWithReviewCore(prompt, hooks);
   const runtimeConformanceEnabled = !/^(0|false|no|off)$/i.test(
-    String(process.env.MODEL_RUNTIME_CONFORMANCE_ENABLED || 'true'),
+    String(process.env.MODEL_RUNTIME_CONFORMANCE_ENABLED || 'false'),
   );
 
   if (!runtimeConformanceEnabled) {
@@ -2027,15 +2380,16 @@ async function routeModelWithReviewBounded(prompt, hooks = {}) {
 
   const semanticContext = [
     await appendCommercialActionContext(prompt),
-    `AUTHORITATIVE EXTERNAL-SIDE-EFFECT TOOL AUDIT
-Before passing any candidate response, verify commercial_action as a real external tool request:
-- Treat commercial_action as an external side-effect tool call, never as a dialogue stage or planning artifact.
+    `AUTHORITATIVE COMMERCIAL-ACTION AUDIT
+Before passing any candidate response, verify commercial_action by its declared effect:
+- Treat request_custom_proposal as a reversible durable internal action: it records one authorized proposal request and must not be described as payment, contract acceptance, provider delivery, or another external mutation.
+- Treat payment links, charges, bookings, provider sends, CRM mutations, and other externally visible or irreversible actions as external side effects requiring exact catalog eligibility, grounded arguments, explicit authorization, idempotency, and verified postconditions.
 - Ordinary conversation, discovery, clarification, recommendations, objection handling, sales progression, profile reasoning, and escalation reasoning must keep commercial_action not selected.
-- If the candidate selects a disabled action or any pseudo-action without a real external side effect, fail and require selected=false with action_id=null.
-- If an enabled external action is selected, verify exact catalog eligibility, argument grounding, authorization, idempotency scope, and customer-visible result.
-- A transactional action passes only when the newest inbound message explicitly and unambiguously authorizes the exact action and option.
+- If the candidate selects a disabled action or a pseudo-action absent from the catalog, fail and require selected=false with action_id=null.
+- request_custom_proposal may pass when the newest customer turn explicitly and unambiguously commits to receiving or advancing a proposal and the objective plus outcome are coherent; optional implementation details may remain proposal assumptions.
+- An external or irreversible action passes only when the newest inbound message explicitly and unambiguously authorizes the exact action and option.
 - Never require an action merely because the assistant asks a question or advances the conversation.
-These rules govern safe external execution; they do not create keyword, language, intent, or sales-stage branches.`,
+These rules govern safe action execution; they do not create keyword, language, intent, or sales-stage branches.`,
   ].join('\n\n');
   const conformanceRuns = [];
   const corrections = [];
@@ -2281,6 +2635,10 @@ These rules govern safe external execution; they do not create keyword, language
 }
 
 export async function routeModelWithReview(prompt, hooks = {}) {
+  // Every live decision passes deterministic structural validation. The
+  // bounded path performs no subjective model review unless explicitly
+  // enabled, and permits one corrective model call only after a structural
+  // contract violation.
   const configuredBudget = Number(process.env.MODEL_TURN_BUDGET_MS || 180000);
   const budgetMs = Number.isFinite(configuredBudget) && configuredBudget > 1000
     ? configuredBudget

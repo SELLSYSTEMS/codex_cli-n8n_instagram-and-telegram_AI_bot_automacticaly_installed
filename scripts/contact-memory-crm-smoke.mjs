@@ -185,39 +185,29 @@ try {
   assert(identities.length === 1, `Expected one customer identity after sparse updates, received ${identities.length}`);
   assertContainsAll(identities[0], ['avery', 'morgan', 'northstar', email, 'email', 'afternoon'], 'Profile after sparse updates');
 
-  drainCrm();
-  let contacts = await matchingRows(client, 'agent.contacts', email);
-  assert(contacts.length === 1, `Expected exactly one local CRM contact for the synthetic email, received ${contacts.length}`);
-  const originalContactId = contacts[0].id;
-  assert(typeof originalContactId === 'string', 'Local CRM contact has no id');
-  const originalLink = await waitForHubSpotLink(client, [originalContactId]);
-  const originalExternalId = originalLink.external_contact_id;
+    let contacts = await matchingRows(client, 'agent.contacts', email);
+    assert(contacts.length === 0, `Synthetic traffic entered CRM projection; received ${contacts.length} contacts`);
 
-  turns.push(await sendMessage('Actually, mornings after 10:00 in UTC+1 are better for follow-up. Please retain the rest of my details.'));
-  drainCrm();
+    turns.push(await sendMessage('Actually, mornings after 10:00 in UTC+1 are better for follow-up. Please retain the rest of my details.'));
 
-    identities = await matchingIdentityProfiles(client, externalUserId);
+      identities = await matchingIdentityProfiles(client, externalUserId);
   assert(identities.length === 1, `Expected one customer identity after preference update, received ${identities.length}`);
   assertContainsAll(identities[0], ['avery', 'morgan', 'northstar', email, 'email'], 'Profile after preference update');
   assertContainsAny(identities[0], ['morning', '10:00', 'after 10'], 'Updated contact time');
   assertContainsAny(identities[0], ['utc+1', 'utc +1', 'utc+01', '+01:00'], 'Updated customer timezone');
 
-  contacts = await matchingRows(client, 'agent.contacts', email);
-  assert(contacts.length === 1, `CRM deduplication failed; received ${contacts.length} contacts for one email`);
-  assert(contacts[0].id === originalContactId, 'CRM update created a new local contact instead of updating the existing contact');
-  assertContainsAll(contacts[0], ['avery', 'morgan', 'northstar', email], 'Local CRM contact after update');
-  const updatedLink = await waitForHubSpotLink(client, [originalContactId]);
-  assert(updatedLink.external_contact_id === originalExternalId, 'HubSpot deduplication failed; external contact id changed');
+    contacts = await matchingRows(client, 'agent.contacts', email);
+    assert(contacts.length === 0, `Synthetic traffic entered CRM projection after update; received ${contacts.length} contacts`);
 
-  const route = turns.at(-1).route;
+    const route = turns.at(-1).route;
   process.stdout.write(`${JSON.stringify({
     ok: true,
-    turns: turns.length,
-    identityCount: identities.length,
-    localContactCount: contacts.length,
-    hubspotLinked: true,
-    deduplicated: true,
-    cumulativeMemory: true,
+      turns: turns.length,
+      identityCount: identities.length,
+      localContactCount: contacts.length,
+      hubspotLinked: false,
+      externalCrmSuppressed: true,
+      cumulativeMemory: true,
     preferenceUpdated: true,
     provider: route.provider,
     model: route.model,

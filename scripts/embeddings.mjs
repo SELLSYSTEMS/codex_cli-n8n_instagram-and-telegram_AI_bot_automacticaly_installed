@@ -1,72 +1,146 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import onnxRuntime from 'onnxruntime-node';
+const positiveInteger = (value, fallback) => {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
 
-const createSession = onnxRuntime.InferenceSession.create.bind(onnxRuntime.InferenceSession);
-onnxRuntime.InferenceSession.create = (model, options = {}) => createSession(model, {
-  ...options,
-  intraOpNumThreads: Number(process.env.EMBEDDING_INTRA_OP_THREADS || 1),
-  interOpNumThreads: Number(process.env.EMBEDDING_INTER_OP_THREADS || 1),
-});
+const API_URL = process.env.EMBEDDING_API_URL
+  || process.env.OPENAI_EMBEDDING_API_URL
+  || 'https://api.openai.com/v1/embeddings';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MODEL = process.env.LOCAL_EMBEDDING_MODEL || 'Xenova/multilingual-e5-small';
-const CACHE = process.env.LOCAL_EMBEDDING_CACHE || path.join(ROOT, '.runtime', 'models');
-const DIMENSION = Number(process.env.LOCAL_EMBEDDING_DIMENSION || 384);
+export const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL
+  || process.env.EMBEDDING_MODEL
+  || 'text-embedding-3-small';
 
-let extractorPromise;
+export const EMBEDDING_DIMENSION = positiveInteger(process.env.EMBEDDING_DIMENSION, 384);
+export const EMBEDDING_FINGERPRINT = `openai-compatible:${EMBEDDING_MODEL}:${EMBEDDING_DIMENSION}`;
 
-async function extractor() {
-  if (!extractorPromise) {
-    extractorPromise = import('@xenova/transformers').then(async ({ pipeline, env }) => {
-      env.cacheDir = CACHE;
-      env.allowLocalModels = true;
-      env.allowRemoteModels = true;
-      return pipeline('feature-extraction', MODEL, { quantized: true });
-    });
+const API_KEY = process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || '';
+const BATCH_SIZE = positiveInteger(process.env.EMBEDDING_BATCH_SIZE, 64);
+const TIMEOUT_MS = positiveInteger(process.env.EMBEDDING_TIMEOUT_MS, 30_000);
+const MAX_RETRIES = positiveInteger(process.env.EMBEDDING_MAX_RETRIES, 2);
+const RETRY_BASE_MS = positiveInteger(process.env.EMBEDDING_RETRY_BASE_MS, 400);
+
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+function validateEmbedding(value, expectedIndex) {
+  if (!Array.isArray(value) || value.length !== EMBEDDING_DIMENSION) {
+    throw new Error(`Embedding ${expectedIndex} has an invalid dimension`);
   }
-  return extractorPromise;
+
+  if (value.some((number) => !Number.isFinite(number))) {
+    throw new Error(`Embedding ${expectedIndex} contains a non-finite value`);
+  }
+
+  return value;
 }
 
-function normalizeRows(value, expected) {
-  let rows = value;
-  if (rows && typeof rows.tolist === 'function') rows = rows.tolist();
-  if (!Array.isArray(rows)) throw new Error('Embedding model returned a non-array value');
-  if (expected === 1 && rows.length === DIMENSION && typeof rows[0] === 'number') rows = [rows];
-  if (rows.length !== expected) throw new Error('Embedding batch size mismatch');
-  for (const row of rows) {
-    if (!Array.isArray(row) || row.length !== DIMENSION) {
-      throw new Error('Embedding dimension mismatch: expected ' + DIMENSION);
+async function requestBatch(input) {
+  if (!API_KEY) {
+    throw new Error('EMBEDDING_API_KEY or OPENAI_API_KEY is required');
+  }
+
+  let lastError;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${API_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: EMBEDDING_MODEL,
+          input,
+          encoding_format: 'float',
+          dimensions: EMBEDDING_DIMENSION,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        await response.arrayBuffer().catch(() => undefined);
+        const error = new Error(`Embedding provider returned HTTP ${response.status}`);
+        error.retryable = response.status === 429 || response.status >= 500;
+        throw error;
+      }
+
+      const payload = await response.json();
+      if (!Array.isArray(payload.data) || payload.data.length !== input.length) {
+        throw new Error('Embedding provider returned an invalid item count');
+      }
+
+      return payload.data
+        .slice()
+        .sort((left, right) => left.index - right.index)
+        .map((item, index) => {
+          if (item.index !== index) {
+            throw new Error('Embedding provider returned invalid indexes');
+          }
+          return validateEmbedding(item.embedding, index);
+        });
+    } catch (error) {
+      lastError = error;
+      const retryable = error?.retryable === true
+        || error?.name === 'AbortError'
+        || error instanceof TypeError;
+
+      if (!retryable || attempt >= MAX_RETRIES) {
+        throw error;
+      }
+
+      await sleep(RETRY_BASE_MS * (2 ** attempt));
+    } finally {
+      clearTimeout(timeout);
     }
   }
-  return rows.map((row) => row.map(Number));
+
+  throw lastError;
 }
 
-async function embed(texts, prefix) {
-  const clean = texts.map((text) => prefix + String(text || '').replace(/\s+/g, ' ').trim());
-  const model = await extractor();
-  const output = await model(clean, { pooling: 'mean', normalize: true });
-  return normalizeRows(output, clean.length);
-}
+export async function embedTexts(texts) {
+  if (!Array.isArray(texts)) {
+    throw new TypeError('embedTexts expects an array');
+  }
 
-export async function embedQueries(texts) {
-  return embed(texts, 'query: ');
+  if (texts.length === 0) {
+    return [];
+  }
+
+  const normalized = texts.map((text) => {
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      throw new TypeError('Every embedding input must be a non-empty string');
+    }
+    return text;
+  });
+
+  const embeddings = [];
+  for (let index = 0; index < normalized.length; index += BATCH_SIZE) {
+    embeddings.push(...await requestBatch(normalized.slice(index, index + BATCH_SIZE)));
+  }
+  return embeddings;
 }
 
 export async function embedQuery(text) {
-  return (await embedQueries([text]))[0];
+  const [embedding] = await embedTexts([text]);
+  return embedding;
 }
 
 export async function embedPassages(texts) {
-  return embed(texts, 'passage: ');
+  return embedTexts(texts);
 }
 
-export function vectorLiteral(values) {
-  if (!Array.isArray(values) || values.length !== DIMENSION) {
-    throw new Error('Invalid vector dimension');
+export function vectorLiteral(embedding) {
+  if (
+    !Array.isArray(embedding)
+    || embedding.length !== EMBEDDING_DIMENSION
+    || embedding.some((value) => !Number.isFinite(value))
+  ) {
+    throw new Error(`Expected a finite ${EMBEDDING_DIMENSION}-dimensional embedding`);
   }
-  return '[' + values.map((value) => Number(value).toFixed(8)).join(',') + ']';
-}
 
-export const embeddingModel = MODEL;
-export const embeddingDimension = DIMENSION;
+  return `[${embedding.join(',')}]`;
+}

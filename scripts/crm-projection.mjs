@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { pool } from './db.mjs';
 import { projectToHubSpot } from './crm-hubspot.mjs';
+import { isSyntheticCrmContext } from './crm-test-classifier.mjs';
 
 try {
   process.loadEnvFile?.('.env');
@@ -68,17 +69,14 @@ async function locateTurn(input, result) {
 
 async function isInternalTestConversation(conversationId) {
   const result = await pool.query(
-    `select (
-       channel in ('scenario_test', 'internal_test')
-       or lower(coalesce(metadata ->> 'test', 'false')) in ('true', '1', 'yes')
-       or lower(coalesce(metadata ->> 'runtime', '')) in ('test', 'scenario')
-     ) as is_internal_test
-       from agent.conversations
-      where id = $1
+    `select c.channel, c.metadata, t.tenant_key
+       from agent.conversations c
+       join agent.tenants t on t.id = c.tenant_id
+      where c.id = $1
       limit 1`,
     [conversationId],
   );
-  return result.rows[0]?.is_internal_test === true;
+  return isSyntheticCrmContext(result.rows[0]);
 }
 
 export async function enqueueCrmProjection(input, result) {
@@ -325,11 +323,38 @@ export async function enqueueCrmBackfill(limit = 250) {
      left join lateral (
        select id, updated_at
          from agent.conversations
-        where tenant_id = c.tenant_id and contact_id = c.id
-          and coalesce(channel, '') not in ('scenario_test', 'internal_test')
-          and lower(coalesce(metadata ->> 'test', 'false')) not in ('true', '1', 'yes')
-          and lower(coalesce(metadata ->> 'runtime', '')) not in ('test', 'scenario')
-        order by updated_at desc
+   where tenant_id = c.tenant_id and contact_id = c.id
+     and coalesce(channel, '') not in (
+       'scenario_test', 'scenario-test', 'internal_test', 'internal-test',
+       'internal_e2e', 'internal-e2e', 'diagnostic_test', 'diagnostic-test'
+     )
+     and lower(coalesce(metadata ->> 'test', 'false')) not in ('true', '1', 'yes')
+     and lower(coalesce(metadata ->> 'synthetic', 'false')) not in ('true', '1', 'yes')
+     and lower(coalesce(metadata ->> 'runtime', '')) not in ('test', 'scenario')
+     and lower(coalesce(metadata ->> 'environment', '')) not in (
+       'test', 'testing', 'scenario', 'diagnostic', 'synthetic',
+       'internal-test', 'internal_test', 'internal-e2e', 'internal_e2e'
+     )
+     and not exists (
+       select 1
+         from agent.tenants test_tenant
+        where test_tenant.id = c.tenant_id
+          and (
+            lower(test_tenant.tenant_key) in (
+              'internal-test', 'internal_test', 'internal-e2e', 'internal_e2e',
+              'scenario-test', 'scenario_test', 'diagnostic-test', 'diagnostic_test'
+            )
+            or lower(test_tenant.tenant_key) like 'internal-test-%'
+            or lower(test_tenant.tenant_key) like 'internal_test_%'
+            or lower(test_tenant.tenant_key) like 'internal-e2e-%'
+            or lower(test_tenant.tenant_key) like 'internal_e2e_%'
+            or lower(test_tenant.tenant_key) like 'scenario-test-%'
+            or lower(test_tenant.tenant_key) like 'scenario_test_%'
+            or lower(test_tenant.tenant_key) like 'diagnostic-test-%'
+            or lower(test_tenant.tenant_key) like 'diagnostic_test_%'
+          )
+     )
+   order by updated_at desc
         limit 1
      ) cv on true
     where cv.id is not null

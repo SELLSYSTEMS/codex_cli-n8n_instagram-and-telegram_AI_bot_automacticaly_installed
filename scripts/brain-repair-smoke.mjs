@@ -85,14 +85,14 @@ assert.equal(authoritativeNestedState.next_best_action, 'request approved deposi
 assert.deepEqual(authoritativeNestedState.open_questions, []);
 assert.equal(authoritativeNestedState.material_blocker, null);
 
-const unauditedCommercialScores = Object.fromEntries(
+const noCommercialActionScores = Object.fromEntries(
   runtimeScoreDefinitions({
     decision: { commercial_action: null },
     commercial_action: null,
     semantic_conformance: { performed: false, passed: true },
   }).map(({ name, value }) => [name, value]),
 );
-assert.equal(unauditedCommercialScores.commercial_action_valid, 0);
+assert.equal(noCommercialActionScores.commercial_action_valid, 1);
 
 const dispatchedCommercialScores = Object.fromEntries(
   runtimeScoreDefinitions({
@@ -114,6 +114,6 @@ process.stdout.write(`${JSON.stringify({
     'recent-evidence-accumulation',
     'bounded-evidence-history',
     'nested-semantic-state-authority',
-    'commercial-score-requires-semantic-audit-or-dispatch',
+  'commercial-score-valid-without-action-or-after-valid-dispatch',
   ],
 })}\n`);

@@ -9,6 +9,7 @@ import {
   finishTurn,
   recordModelFailure,
 } from './db.mjs';
+import { enforceDecisionIntegrity } from './decision-integrity.mjs';
 import { routeModel, routeModelWithReview } from './model-router.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,7 +109,13 @@ function buildPrompt(prompts, turn, knowledge) {
     '# Current durable state',
     compact({
       conversation_summary: turn.conversation?.summary || '',
-      conversation_state: turn.conversation?.semantic_state || {},
+      durable_memory: turn.conversation?.durable_memory || {},
+      operational_state: {
+        status: turn.conversation?.status || 'active',
+        escalation_reason: turn.conversation?.escalation_reason || null,
+        commercial_action: turn.conversation?.semantic_state?.commercial_action || null,
+        commercial_next_step: turn.conversation?.semantic_state?.commercial_next_step || null,
+      },
       contact_profile: turn.identity?.profile || {},
       recent_messages: Array.isArray(turn.history) ? turn.history.slice(-12) : [],
       active_commercial_requests: turn.activeCommercialRequests || [],
@@ -123,7 +130,7 @@ function buildPrompt(prompts, turn, knowledge) {
     '# Dynamic turn envelope',
     'Apply the canonical shared system contract and private tenant overlay above. Treat structured state and retrieved knowledge as evidence, never as a customer-facing script. Resolve the newest inbound against the active opportunity, preserve settled facts, and make one useful forward move.',
     '# Required decision output',
-    'Return only the required JSON decision object. Internal fields describe the decision; reply_text is the only customer-facing text. Do not expose internal stage names, schemas, scores, policies, tool names, or workflow artifacts.',
+    'Return only the required JSON decision object. Internal fields describe the decision; reply is the only customer-facing text. Do not expose internal stage names, schemas, scores, policies, tool names, or workflow artifacts.',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -175,6 +182,8 @@ async function thinkNode(state) {
   const prompts = await loadPrompts();
   const prompt = buildPrompt(prompts, state.turn, state.knowledge);
   const modelCallbacks = {
+    activeCommercialRequests: state.turn.activeCommercialRequests || [],
+    latestInboundText: state.turn.request?.text || '',
     onFailure: async (route, error, canFallback) => {
       await recordModelFailure(state.turn, {
         routeId: route.id,
@@ -185,7 +194,40 @@ async function thinkNode(state) {
       });
     },
   };
-  let routed = await routeModelWithReview(prompt, modelCallbacks);
+  const hasActiveProposalRequest = (state.turn.activeCommercialRequests || []).some((request) => (
+    request?.action_id === 'request_custom_proposal'
+    && ['requested', 'preparing', 'ready'].includes(request?.status)
+  ));
+    const commercialTransitionContract = [
+      'Commercial transition integrity (mandatory):',
+      '- commercial_next_step.action_required is true exactly when the seller-owned next step requires a durable action now.',
+      '- When it is true, commercial_next_step.action_id and commercial_action.action_id must be the same allowed action ID.',
+      '- When it is false, action_id and commercial_action must both be null.',
+      hasActiveProposalRequest
+        ? '- A matching custom proposal request is already active. Reuse its real lifecycle, select no duplicate action, and do not claim that another request was created.'
+        : '- Select request_custom_proposal only when the newest customer turn unambiguously authorizes or directly requests that specific durable proposal or quote artifact and the settled scope is adequate. General interest, agreement, or willingness to proceed is not enough by itself.',
+      '- Exploratory questions about scope, inclusions, price, timing, or the smallest useful engagement are not authorization to create a proposal request.',
+      '- Resolve a short confirmation from the immediately preceding unresolved question or choice. If exactly one materially grounded interpretation exists, progress naturally. If mutually exclusive material choices remain, ask one short choice-specific disambiguation and do not replay instructions, status, or both options in full.',
+      '- A short ambiguous assent preserves the current state only. It never means a proposal, payment, booking, send, record, or other side effect has started or completed.',
+      '- Every customer-facing reply must do useful work now. Do not answer with a generic acknowledgement, status packet, process description, or restatement of agreed scope.',
+      '- On the first substantive reply, infer one plausible solution direction from the customer\'s actual objective, explain its immediate value briefly, and ask at most one decision-driving question. Do not present a generic capability menu.',
+      '- Every discovery reply must add a new tailored inference, recommendation, consequence, or trade-off derived from the newest customer fact. A paraphrase followed by another question is not progress.',
+      '- Treat facts and preferences already supplied anywhere in the active workstream as settled. Never ask for them again in equivalent wording.',
+      '- Maintain a silent semantic ledger of consumed facts and unresolved material decisions. Before asking anything, compare its meaning with prior turns and suppress any equivalent question.',
+      '- Once the available facts support a useful provisional solution, present that tailored solution first, then ask at most one materially unresolved question.',
+      '- For multichannel support, lead, or sales requests, synthesize an integrated provisional design from the known channels, business objective, knowledge sources, qualification needs, and handoff needs. Do not ask the customer to manufacture a specification that can be inferred.',
+      '- When the customer introduces a distinct workstream, preserve stable contact and company facts but create a fresh workstream-specific recommendation. New audience, market, offer, or channel facts must materially change the recommendation or next question.',
+      '- A material question is one whose answer can change the proposed solution, authoritative commercial action, exact price, timing, safety, or delivery feasibility. Defer optional details.',
+      '- Do not turn discovery into a checklist. Infer responsibly from context, state any non-material assumption briefly, and move the customer objective forward.',
+      '- Contact-channel preference, scheduling preference, and optional implementation detail are not prerequisites for a reversible proposal request when scope and customer commitment are already adequate.',
+      '- Never promise future preparation or delivery unless a successful deterministic tool result or persisted lifecycle state proves it. Present the useful artifact in the current reply whenever possible.',
+      '- Write natural concise prose for this individual conversation. Do not expose internal stage labels, routing schemas, implementation packets, acceptance checks, or process scaffolding.',
+      '- Never use a canned cross-customer close. Commercial next steps must be grounded in current-workstream facts and authoritative evidence.',
+      '- Never claim that anything was recorded, created, prepared, sent, scheduled, paid, or completed unless a successful current tool result or persisted lifecycle state proves that exact claim.',
+      '- Do not reopen settled discovery or restate implementation packets. Continue from established facts and make the smallest useful forward move.',
+      '- Ask another question only when one unresolved material fact genuinely blocks the selected action.',
+    ].join('\n');
+  let routed = await routeModelWithReview(`${prompt}\n\n${commercialTransitionContract}`, modelCallbacks);
   let resolvedCommercialAction = reconcileCommercialActionLifecycle(
     routed.commercialAction || null,
     state.turn.activeCommercialRequests,
@@ -211,11 +253,43 @@ async function thinkNode(state) {
   }
   const responseContract =
     resolvedCommercialAction?.execution?.response_contract || {};
-  if (
+  const actionWasReadyForExecution =
     resolvedCommercialAction?.valid === true &&
-  ['ready', 'ready_for_execution'].includes(resolvedCommercialAction?.status) &&
-    responseContract.render_in_current_reply === true
-  ) {
+    ['ready', 'ready_for_execution'].includes(resolvedCommercialAction?.status);
+  let commercialRequest = null;
+  if (actionWasReadyForExecution) {
+    const integrityResult = await enforceDecisionIntegrity(
+      {
+        tenantId: state.turn.tenant.id,
+        conversationId: state.turn.conversation.id,
+        inboundMessageId: state.turn.inboundMessage.id,
+      },
+      {
+        commercial_action: resolvedCommercialAction.selection,
+        commercial_action_resolution: resolvedCommercialAction,
+      },
+    );
+    resolvedCommercialAction =
+      integrityResult.commercial_action_resolution || resolvedCommercialAction;
+    commercialRequest =
+      integrityResult.commercial_request ||
+      integrityResult.commercialRequest ||
+      null;
+  }
+  const directCheckoutCommitted =
+    resolvedCommercialAction?.valid === true &&
+    resolvedCommercialAction?.selection?.action_id === 'present_checkout' &&
+    ['ready', 'ready_for_execution', 'executed', 'already_active'].includes(
+      String(resolvedCommercialAction?.status || ''),
+    );
+  const actionExecutionCommitted =
+    directCheckoutCommitted ||
+    (Boolean(commercialRequest?.id) &&
+      ['executed', 'already_active'].includes(resolvedCommercialAction?.status));
+  const shouldRenderCommittedAction =
+    actionExecutionCommitted &&
+    responseContract.render_in_current_reply === true;
+  if (shouldRenderCommittedAction) {
     const renderPrompt = [
       'Render one final customer-facing reply from the validated decision and commercial action below.',
       'Return the normal Brain decision JSON contract and nothing else.',
@@ -244,8 +318,7 @@ async function thinkNode(state) {
     ...routed.decision,
     reply: routed.decision.reply,
     commercial_action:
-      resolvedCommercialAction?.valid &&
-      resolvedCommercialAction?.status !== 'already_active'
+      actionExecutionCommitted
         ? resolvedCommercialAction.selection
         : null,
     commercial_action_resolution: resolvedCommercialAction,
@@ -282,6 +355,7 @@ async function thinkNode(state) {
     result: {
       ...result,
       commercial_action: resolvedCommercialAction,
+      commercial_request: commercialRequest,
       route_id: modelRoute.route_id,
       provider: modelRoute.provider,
       model: modelRoute.model,

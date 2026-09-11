@@ -10,6 +10,8 @@
     "intent",
     "conversation_phase",
     "customer_readiness",
+    "commercial_readiness",
+    "scope_sufficiency",
     "material_blocker",
     "next_best_action",
     "commercial_progress",
@@ -17,6 +19,7 @@
     "confirmed_commitments",
     "pending_customer_commitment",
     "solution_scope",
+    "action",
     "should_reply",
     "should_escalate",
     "escalation_reason",
@@ -56,6 +59,24 @@
       "type": "string",
       "minLength": 1,
       "description": "A concise evidence-based assessment of the customer's present readiness to progress or commit."
+    },
+    "commercial_readiness": {
+      "type": "string",
+      "enum": [
+        "not_ready",
+        "considering",
+        "explicitly_ready"
+      ],
+      "description": "Semantic readiness selected by the model from the complete conversation and evidence."
+    },
+    "scope_sufficiency": {
+      "type": "string",
+      "enum": [
+        "insufficient",
+        "proposal_ready",
+        "transaction_ready"
+      ],
+      "description": "Whether known scope is sufficient for the next commercial action without another redundant confirmation."
     },
     "solution_scope": {
       "type": "object",
@@ -149,6 +170,15 @@
         "null"
       ],
       "description": "At most one genuinely unresolved customer action required to progress. Use null when none remains or when the customer has supplied or accepted it. An optional implementation detail, repeated final confirmation, or internal planning step is neither a pending customer commitment nor a material blocker."
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "reply",
+        "silent",
+        "escalate"
+      ],
+      "description": "Canonical conversational action. Must be escalate whenever should_escalate is true, silent only when should_reply is false, and reply otherwise."
     },
     "should_reply": {
       "type": "boolean"
@@ -420,34 +450,37 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "description": "A short exact excerpt from the newest inbound customer message grounding the selected action. For request_custom_proposal this may express unambiguous commitment to the uniquely active scope and is not payment authorization."
             },
             "authorization_is_explicit": {
               "type": "boolean",
-              "description": "Whether the newest inbound message explicitly authorizes this exact commercial action."
+              "description": "For payment or another external action only: whether the newest inbound message explicitly authorizes that exact action."
             },
             "authorization_is_unambiguous": {
               "type": "boolean",
-              "description": "Whether no other service, scope, price, payment option, or next step could reasonably be meant."
+              "description": "For payment or another external action only: whether the authorization in the newest inbound message is unambiguous."
             },
             "authorization_evidence": {
               "type": "string",
-              "description": "Short evidence from the newest inbound message; empty when authorization is absent."
+              "description": "For payment or another external action only: a short exact authorization excerpt from the newest inbound customer message."
             },
             "authorization_scope": {
               "type": "string",
-              "description": "The exact service, option, amount, and action authorized; empty when unresolved."
+              "description": "The exact grounded active scope for a proposal request, or the exact service, option, amount, and action authorized for an external transaction."
             }
           }
         }
       },
-      "description": "External side-effect tool request selected by the model. Ordinary conversation uses selected=false with action_id=null. Dialogue acts, discovery, recommendations, objection handling, sales progression, profile reasoning, and escalation reasoning are not tools."
+      "description": "A declared durable internal commercial transition or a grounded external side effect. Never use it for ordinary dialogue, discovery, planning, recommendations, or memory updates."
     },
     "commercial_next_step": {
       "type": "object",
       "additionalProperties": false,
       "description": "LLM-selected commercial progression grounded in conversation, memory, RAG, private policy, and verified tool results.",
       "required": [
+        "action_required",
+        "action_id",
         "stage",
         "customer_outcome",
         "recommended_step",
@@ -458,6 +491,14 @@
         "grounding_refs"
       ],
       "properties": {
+        "action_required": {
+          "type": "boolean",
+          "description": "True exactly when the seller-owned next step requires a durable commercial action in this turn."
+        },
+        "action_id": {
+          "type": ["string", "null"],
+          "description": "The matching commercial_action.action_id when action_required is true; otherwise null."
+        },
         "stage": {
           "type": "string",
           "enum": [

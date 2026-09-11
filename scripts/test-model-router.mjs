@@ -5,7 +5,10 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { canonicalCommercialAction } from './model-router.mjs';
+import {
+  buildOpenAIResponseRequest,
+  canonicalCommercialAction,
+} from './model-router.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -102,22 +105,23 @@ assert.ok(enabledRoutes.length > 0, 'At least one model route must be enabled');
 const isPublicDefault =
   path.relative(rootDir, configPath) === path.join('config', 'model-routes.default.json');
 
-  if (isPublicDefault) {
+if (isPublicDefault) {
     assert.deepEqual(
       enabledRoutes.map(routeLabel),
-      ['codex_cli/gpt-5.6-sol', 'codex_cli/gpt-5.3-codex-spark'],
-      'The public default route chain must be Codex 5.6, then Codex Spark on quota exhaustion',
+      ['openai/gpt-4.1', 'deepseek/deepseek-v4-pro'],
+      'The public default route chain must be OpenAI gpt-4.1, then DeepSeek Pro on classified provider failure',
     );
 
-    assert.equal(enabledRoutes[0].reasoning_effort, 'high', 'Codex 5.6 must use high reasoning');
-    assert.equal(enabledRoutes[1].reasoning_effort, 'low', 'Codex Spark quota fallback must use low reasoning');
+    assert.equal(enabledRoutes[0].supports_reasoning, false, 'OpenAI gpt-4.1 must not receive reasoning parameters');
+    assert.equal(enabledRoutes[0].reasoning_effort, 'low', 'OpenAI route must retain the normalized low setting');
+    assert.equal(enabledRoutes[1].reasoning_effort, 'high', 'DeepSeek Pro fallback must use high reasoning');
 
     const disabledRoutes = new Set(routes.filter((route) => !route.enabled).map(routeLabel));
     for (const expected of [
-      'deepseek/deepseek-v4-pro',
-      'deepseek/deepseek-v4-flash',
-      'openai/gpt-4.1',
+      'codex_cli/gpt-5.6-sol',
+      'codex_cli/gpt-5.3-codex-spark',
       'codex_cli/gpt-5.4-mini',
+      'deepseek/deepseek-v4-flash',
     ]) {
       assert.ok(disabledRoutes.has(expected), `${expected} must be available but disabled by default`);
     }
@@ -143,8 +147,9 @@ const flatCommercialSelection = canonicalCommercialAction(
 );
 
 assert.deepEqual(flatCommercialSelection.arguments, {
-  option_id: 'deposit',
-  grounded_total_usd: 1256,
+    option_id: 'deposit',
+    offer_id: null,
+    grounded_total_usd: 1256,
   grounding_reference: 'Proof-Driven Landing Build: about US$1,256.',
   missing_fact: null,
   customer_commitment: null,
@@ -186,6 +191,25 @@ assert.equal(
   nestedCommercialSelection.arguments.authorization_is_explicit,
   false,
 );
+
+const nonReasoningOpenAiRequest = buildOpenAIResponseRequest(
+  { model: 'gpt-4.1', reasoning_effort: 'low' },
+  'Return JSON.',
+);
+assert.equal(
+  Object.hasOwn(nonReasoningOpenAiRequest, 'reasoning'),
+  false,
+  'OpenAI reasoning must be opt-in by explicit route capability',
+);
+const reasoningOpenAiRequest = buildOpenAIResponseRequest(
+  {
+    model: 'gpt-5.6',
+    supports_reasoning: true,
+    reasoning_effort: 'high',
+  },
+  'Return JSON.',
+);
+assert.deepEqual(reasoningOpenAiRequest.reasoning, { effort: 'high' });
 
 console.log(
   JSON.stringify(

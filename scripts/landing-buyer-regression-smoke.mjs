@@ -75,7 +75,7 @@ const blocked = releaseTextOnlyAfterConformanceFailure(
   {
     shouldReply: true,
     decision: {
-      reply: "Pay an unsupported 35% deposit now.",
+      reply: "I can explain the verified options while the action stays blocked.",
       commercial_action: {
         action_id: "present_checkout",
       },
@@ -91,10 +91,10 @@ const blocked = releaseTextOnlyAfterConformanceFailure(
 assert.equal(blocked.shouldReply, true);
 assert.equal(blocked.decision.commercial_action, null);
 assert.equal(blocked.commercialAction, null);
-assert.equal(blocked.semanticConformance.releaseMode, "safe_reply_fail_closed");
+assert.equal(blocked.semanticConformance.releaseMode, "text_only_fail_safe");
 assert.equal(blocked.semanticConformance.actionsBlocked, true);
 assert.deepEqual(blocked.semanticConformance.violations, semanticError.violations);
-assert.doesNotMatch(blocked.decision.reply, /35%/);
+assert.equal(blocked.decision.reply, "I can explain the verified options while the action stays blocked.");
 
 const normalizedAuthorizedDeposit = normalizeCommercialAction({
   action_id: "present_checkout",

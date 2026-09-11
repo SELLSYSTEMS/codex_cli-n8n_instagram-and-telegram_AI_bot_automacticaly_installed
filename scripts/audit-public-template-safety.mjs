@@ -51,13 +51,28 @@ for (const relative of files) {
 const routePath = join(root, 'config/model-routes.default.json');
 const routeConfig = JSON.parse(await readFile(routePath, 'utf8'));
 const openai = routeConfig.routes.find((route) => route.id === 'openai_api');
-if (!openai || openai.model !== 'gpt-4.1' || openai.enabled !== false) {
-  errors.push('config/model-routes.default.json: OpenAI route must be disabled and use gpt-4.1');
+if (!openai || openai.model !== 'gpt-4.1' || openai.enabled !== true) {
+  errors.push('config/model-routes.default.json: OpenAI route must be enabled and use gpt-4.1');
+}
+const deepseekPro = routeConfig.routes.find((route) => route.id === 'deepseek_v4_pro');
+if (!deepseekPro || deepseekPro.model !== 'deepseek-v4-pro' || deepseekPro.enabled !== true) {
+  errors.push('config/model-routes.default.json: DeepSeek Pro route must be the enabled secondary route');
 }
 const enabled = routeConfig.routes.filter((route) => route.enabled).sort((a, b) => a.priority - b.priority);
 const enabledChain = enabled.map((route) => `${route.provider}/${route.model}`);
-if (JSON.stringify(enabledChain) !== JSON.stringify(['codex_cli/gpt-5.6-sol', 'codex_cli/gpt-5.3-codex-spark'])) {
-  errors.push('config/model-routes.default.json: enabled chain must be Codex 5.6 followed by Codex Spark only');
+if (JSON.stringify(enabledChain) !== JSON.stringify(['openai/gpt-4.1', 'deepseek/deepseek-v4-pro'])) {
+  errors.push('config/model-routes.default.json: enabled chain must be OpenAI gpt-4.1 followed by DeepSeek Pro only');
+}
+const disabledRoutes = new Set(routeConfig.routes.filter((route) => !route.enabled).map((route) => `${route.provider}/${route.model}`));
+for (const expected of [
+  'codex_cli/gpt-5.6-sol',
+  'codex_cli/gpt-5.3-codex-spark',
+  'codex_cli/gpt-5.4-mini',
+  'deepseek/deepseek-v4-flash',
+]) {
+  if (!disabledRoutes.has(expected)) {
+    errors.push(`config/model-routes.default.json: ${expected} must be available but disabled by default`);
+  }
 }
 
 const workflowFiles = files.filter((file) => file.startsWith('workflows/') && file.endsWith('.json'));

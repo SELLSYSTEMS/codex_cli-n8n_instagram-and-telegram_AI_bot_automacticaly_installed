@@ -16,10 +16,12 @@ const expectedAgentTables = [
   'crm_sync_outbox',
   'delivery_events',
   'identities',
+  'inbound_events',
   'knowledge_chunks',
   'knowledge_documents',
   'messages',
   'model_runs',
+  'schema_migrations',
   'tenants',
 ].sort();
 

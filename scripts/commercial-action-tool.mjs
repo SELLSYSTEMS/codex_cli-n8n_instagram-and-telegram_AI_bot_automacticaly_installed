@@ -159,45 +159,83 @@ function roundMoney(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
-export function inferGroundedUsdTotalFromReference(reference, sourcePrompt) {
-  const evidence = String(reference || '').trim();
-  const source = String(sourcePrompt || '');
-  if (
-    !evidence
-    || !source
-    || !source.toLocaleLowerCase().includes(evidence.toLocaleLowerCase())
-  ) {
-    return null;
-  }
+function normalizeGroundingText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
+}
 
+function normalizeAuthorizationText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{S}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function authorizationEvidenceMatchesLatestInbound(evidence, latestInboundText) {
+  const normalizedEvidence = normalizeAuthorizationText(evidence);
+  const normalizedInbound = normalizeAuthorizationText(latestInboundText);
+  return Boolean(normalizedEvidence)
+    && Boolean(normalizedInbound)
+    && normalizedEvidence === normalizedInbound;
+}
+
+function extractUsdAmounts(value) {
   const matches = [
-    ...evidence.matchAll(
+    ...String(value || '').matchAll(
       /(?:US\$|\$)\s*(\d[\d,]*(?:\.\d{1,2})?)(?:\s*USD\b)?|\bUSD\s*(\d[\d,]*(?:\.\d{1,2})?)/gi,
     ),
   ];
   const amounts = matches
     .map((match) => Number(String(match[1] || match[2] || '').replaceAll(',', '')))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  const uniqueAmounts = [
+    .filter((amount) => Number.isFinite(amount) && amount > 0);
+  return [
     ...new Map(amounts.map((amount) => [amount.toFixed(2), roundMoney(amount)])).values(),
   ];
+}
 
-  return uniqueAmounts.length === 1 ? uniqueAmounts[0] : null;
+export function inferGroundedUsdTotalFromReference(reference, sourcePrompt) {
+  const evidence = normalizeGroundingText(reference);
+  const source = normalizeGroundingText(sourcePrompt);
+  if (
+    !evidence
+    || !source
+    || !source.includes(evidence)
+  ) {
+    return null;
+  }
+
+  const totalLines = evidence.split('\n').filter((line) => (
+    /\b(?:(?:exact|agreed|project|commercial|grand)\s+)?total\b/i.test(line)
+    && !/\bdeposit\b/i.test(line)
+  ));
+  const totalAmounts = extractUsdAmounts(totalLines.join('\n'));
+  if (totalAmounts.length === 1) return totalAmounts[0];
+
+  const allAmounts = extractUsdAmounts(evidence);
+  return allAmounts.length === 1 ? allAmounts[0] : null;
+}
+
+export function groundingReferenceSupportsUsdAmount(reference, amount, sourcePrompt) {
+  const target = Number(amount);
+  if (!Number.isFinite(target) || target <= 0) return false;
+
+  const evidence = normalizeGroundingText(reference);
+  const source = normalizeGroundingText(sourcePrompt);
+  if (!evidence || !source || !source.includes(evidence)) return false;
+
+  return extractUsdAmounts(evidence)
+    .some((candidate) => Math.abs(candidate - target) < 0.005);
 }
 
 function referenceIsGrounded(reference, amount, sourcePrompt) {
-  if (!reference || !sourcePrompt) return false;
-
-  const source = String(sourcePrompt).toLocaleLowerCase();
-  const evidence = String(reference).trim().toLocaleLowerCase();
-  if (!source.includes(evidence)) return false;
-
-  const numbers = String(reference)
-    .match(/(?:\d[\d,]*(?:\.\d+)?)/g)
-    ?.map((value) => Number(value.replaceAll(',', '')))
-    .filter(Number.isFinite) || [];
-
-  return numbers.some((value) => Math.abs(value - amount) < 0.005);
+  return groundingReferenceSupportsUsdAmount(reference, amount, sourcePrompt);
 }
 
 function inferGroundingReference(amount, sourcePrompt) {
@@ -213,6 +251,15 @@ function inferGroundingReference(amount, sourcePrompt) {
     /authoritative|commercial[_ -]truth|price|pricing|usd|total|cost/i.test(candidate)
     && referenceIsGrounded(candidate, target, sourcePrompt)
   )) || null;
+}
+
+export function canonicalizeGroundingReference(reference, amount, sourcePrompt) {
+  const canonical = inferGroundingReference(amount, sourcePrompt);
+  if (canonical) return canonical;
+
+  return referenceIsGrounded(reference, amount, sourcePrompt)
+    ? String(reference).trim()
+    : null;
 }
 
 export async function loadCommercialActionCatalog() {
@@ -261,7 +308,7 @@ export async function appendCommercialActionContext(prompt) {
 EXECUTABLE COMMERCIAL TOOLS
 This inventory is an execution contract, not a general price list. An offer is available only when the current requested outcome and material scope match it.
 Unmatched offers, amounts, deposits, checkout URLs, and payment terms are invisible to customer-facing prose and cannot be used as examples or benchmarks.
-When no offer matches, keep commercial_action.action_id null and continue with a truthful custom-scope next step without mentioning any catalog offer or amount.
+When no catalog offer matches, do not select a catalog checkout or quote an unmatched offer or amount. A catalog match is not a prerequisite for request_custom_proposal: when the customer has committed to a sufficiently grounded custom scope and no material blocker remains, select that internal reversible action using its required evidence and arguments. Otherwise continue the conversation naturally without claiming that a request was created.
 Use natural-language reasoning for discovery, qualification, recommendations, objections, summaries, and ordinary next steps. Those are conversation, not tools.
 Set commercial_action.action_id to null unless a real side effect listed below must be executed now. A null action must never stall the conversation.
 Ask at most one high-information question only when its answer materially changes scope, recommendation, price, or safe execution. Never repeat a resolved question.
@@ -303,7 +350,7 @@ function semanticRationaleIsMeaningful(reference) {
   return normalizedReference.length >= 24;
 }
 
-export async function resolveCommercialAction(rawSelection, sourcePrompt = '') {
+export async function resolveCommercialAction(rawSelection, sourcePrompt = '', context = {}) {
   const catalog = await loadCommercialActionCatalog();
   const selection = cleanSelection(rawSelection);
 
@@ -318,6 +365,33 @@ export async function resolveCommercialAction(rawSelection, sourcePrompt = '') {
   }
 
   const action = catalog.actions?.find((candidate) => candidate.id === selection.action_id);
+  const promptText = String(sourcePrompt || "");
+  const inboundMarker = "# New inbound message";
+  const inboundMarkerIndex = promptText.lastIndexOf(inboundMarker);
+  const newestInboundText = (() => {
+    const explicitInbound = String(context.latestInboundText || '').trim();
+    if (explicitInbound) return explicitInbound;
+    if (inboundMarkerIndex < 0) return "";
+    const remainder = promptText.slice(inboundMarkerIndex + inboundMarker.length);
+    const nextSection = remainder.search(/\n#\s+/u);
+    return (nextSection >= 0 ? remainder.slice(0, nextSection) : remainder).trim();
+  })();
+  const normalizedNewestInbound = normalizeAuthorizationText(newestInboundText);
+  const normalizedPrompt = normalizeAuthorizationText(promptText);
+  const isGroundedAuthorizationPhrase = (value) =>
+    authorizationEvidenceMatchesLatestInbound(value, newestInboundText);
+  const isGroundedScope = (value) => {
+    const normalized = normalizeAuthorizationText(value);
+    const tokens = normalized.split(" ").filter((token) => token.length >= 3);
+    if (normalized.length < 8 || tokens.length < 2) return false;
+    const grounded = tokens.filter((token) => normalizedPrompt.includes(token));
+    return grounded.length / tokens.length >= 0.6;
+  };
+  const isLiteralNewestInboundExcerpt = (value) => {
+    const normalized = normalizeAuthorizationText(value);
+    return normalized.length > 0 && normalizedNewestInbound.includes(normalized);
+  };
+
   if (selection.action_id === "request_custom_proposal") {
     if (!isExecutableCommercialAction(action, catalog)) {
       return {
@@ -328,12 +402,23 @@ export async function resolveCommercialAction(rawSelection, sourcePrompt = '') {
         execution: null,
       };
     }
-    if (action.requires_customer_commitment === true && !selection.arguments?.customer_commitment) {
+    const customerCommitment = selection.arguments?.customer_commitment;
+    const proposalScope = selection.arguments?.authorization_scope;
+    const boundedCommitment = typeof customerCommitment === "string"
+      && customerCommitment.trim().length > 0
+      && customerCommitment.trim().length <= 1000;
+    const boundedProposalScope = typeof proposalScope === "string"
+      && proposalScope.trim().length >= 8
+      && proposalScope.trim().length <= 2000;
+    if (
+      (action.requires_customer_commitment === true && !boundedCommitment)
+      || !boundedProposalScope
+    ) {
       return {
         valid: false,
-        status: "invalid",
-        reason: "missing_customer_commitment",
-        selection,
+        status: "rejected",
+        reason: "proposal_missing_bounded_commitment_or_scope",
+        selection: null,
         execution: null,
       };
     }
@@ -351,8 +436,8 @@ export async function resolveCommercialAction(rawSelection, sourcePrompt = '') {
         action_id: action.id,
         status: "requested",
         seller_owned: true,
-        customer_commitment: selection.arguments?.customer_commitment,
-        source_prompt: sourcePrompt || null,
+        customer_commitment: customerCommitment,
+        authorization_scope: proposalScope,
         response_contract: action.response_contract || {},
       },
     };
@@ -374,8 +459,8 @@ export async function resolveCommercialAction(rawSelection, sourcePrompt = '') {
     if (
       args.authorization_is_explicit !== true
       || args.authorization_is_unambiguous !== true
-      || !evidence
-      || !scope
+      || !isGroundedAuthorizationPhrase(evidence)
+      || !isGroundedScope(scope)
     ) {
       return {
         valid: false,
@@ -502,9 +587,10 @@ export async function resolveCommercialAction(rawSelection, sourcePrompt = '') {
       };
     }
 
-    selection.arguments.grounding_reference = (
-      selection.arguments.grounding_reference
-      || inferGroundingReference(total, sourcePrompt)
+    selection.arguments.grounding_reference = canonicalizeGroundingReference(
+      selection.arguments.grounding_reference,
+      total,
+      sourcePrompt,
     );
 
     if (!offerIsOperational && !referenceIsGrounded(

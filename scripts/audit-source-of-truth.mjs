@@ -142,12 +142,59 @@ const runtimeRoutesPath = registry?.domains?.modelRouting?.runtimeOverride;
 if (runtimeRoutesPath && exists(runtimeRoutesPath)) {
   const runtimeRoutes = readJson(runtimeRoutesPath);
   const runtimeList = Array.isArray(runtimeRoutes?.routes) ? runtimeRoutes.routes : [];
-  const defaultSignatures = routes.map(routeSignature);
-  const runtimeSignatures = runtimeList.map(routeSignature);
+  const publicContracts = new Map(
+    routes.map((route) => [route.id, { provider: route.provider, model: route.model }]),
+  );
+  const runtimeIds = runtimeList.map((route) => route.id);
+  const priorities = runtimeList.map((route) => route.priority);
+  const contractCompatible =
+    runtimeIds.length === publicContracts.size &&
+    new Set(runtimeIds).size === runtimeIds.length &&
+    runtimeList.every((route) => {
+      const contract = publicContracts.get(route.id);
+      return contract?.provider === route.provider && contract?.model === route.model;
+    });
+  const priorityCompatible =
+    priorities.every((priority) => Number.isFinite(priority)) &&
+    new Set(priorities).size === priorities.length;
+  const hasEnabledRoute = runtimeList.some((route) => route.enabled === true);
+  const inlineSecretPaths = [];
+  const inspectInlineSecrets = (value, pathParts = []) => {
+    if (!value || typeof value !== "object") return;
+    for (const [key, nested] of Object.entries(value)) {
+      const nextPath = [...pathParts, key];
+      if (
+        /(secret|token|password|api[_-]?key|authorization)/i.test(key) &&
+        typeof nested === "string" &&
+        nested.trim()
+      ) {
+        inlineSecretPaths.push(nextPath.join("."));
+      }
+      inspectInlineSecrets(nested, nextPath);
+    }
+  };
+  inspectInlineSecrets(runtimeRoutes);
   record(
-    "runtime model route drift",
-    JSON.stringify(runtimeSignatures) === JSON.stringify(defaultSignatures),
-    "runtime route order or material fields differ from the public contract"
+    "runtime model route contract compatibility",
+    contractCompatible,
+    "runtime routes must preserve the complete public id/provider/model contract",
+  );
+  record(
+    "runtime model route priorities",
+    priorityCompatible,
+    "runtime route priorities must be finite and unique",
+  );
+  record(
+    "runtime model route availability",
+    hasEnabledRoute,
+    "runtime override must leave at least one model route enabled",
+  );
+  record(
+    "runtime model route secret hygiene",
+    inlineSecretPaths.length === 0,
+    inlineSecretPaths.length
+      ? `inline secret-like values found at ${inlineSecretPaths.join(", ")}`
+      : "runtime route configuration contains no inline secrets",
   );
 } else {
   warnings.push("runtime model route file is absent; acceptable only before installation");
@@ -239,13 +286,21 @@ if (hasPrivate) {
 }
 
 const modelDocs = readText("docs/model-routing.md");
-for (const marker of [
-  "gpt-5.6-sol",
-  "gpt-5.3-codex-spark",
-  "shared ChatGPT plan allowance"
+for (const [label, marker] of [
+  ["OpenAI primary model", "gpt-4.1"],
+  ["DeepSeek fallback model", "deepseek-v4-pro"]
 ]) {
-  record("model docs " + marker, modelDocs.includes(marker), "documentation marker is missing");
+  record(
+    "model docs " + label,
+    modelDocs.includes(marker),
+    `documentation marker is missing: ${marker}`
+  );
 }
+record(
+  "model docs classified fallback contract",
+  /classified/i.test(modelDocs) && /fallback/i.test(modelDocs),
+  "documentation must describe classified fallback behavior"
+);
 
 const brainDocs = readText("docs/brain-api.md");
 record(

@@ -5,39 +5,39 @@
     {
       "id": "openai_api",
       "provider": "openai",
-      "enabled": false,
-      "priority": 30,
+      "enabled": true,
+      "priority": 10,
       "model": "gpt-4.1",
       "supports_reasoning": false,
       "purpose": "primary OpenAI API route",
       "reasoning_effort": "low"
     },
     {
+      "id": "deepseek_v4_pro",
+      "provider": "deepseek",
+      "enabled": true,
+      "priority": 20,
+      "model": "deepseek-v4-pro",
+      "reasoning_effort": "high",
+      "purpose": "secondary classified API fallback"
+    },
+    {
       "id": "codex_gpt_5_6_sol",
       "provider": "codex_cli",
-      "enabled": true,
-      "priority": 10,
+      "enabled": false,
+      "priority": 30,
       "model": "gpt-5.6-sol",
       "reasoning_effort": "high",
-      "purpose": "Primary Codex CLI conversation route"
+      "purpose": "disabled optional Codex CLI development route"
     },
     {
       "id": "codex_spark",
       "provider": "codex_cli",
-      "enabled": true,
-      "priority": 20,
-      "model": "gpt-5.3-codex-spark",
-      "reasoning_effort": "low",
-      "purpose": "Secondary Codex CLI route used only when the primary route is unavailable or quota-limited"
-    },
-    {
-      "id": "deepseek_v4_pro",
-      "provider": "deepseek",
       "enabled": false,
       "priority": 40,
-      "model": "deepseek-v4-pro",
-      "reasoning_effort": "high",
-      "purpose": "disabled API route"
+      "model": "gpt-5.3-codex-spark",
+      "reasoning_effort": "low",
+      "purpose": "disabled optional Codex CLI development route"
     },
     {
       "id": "codex_mini",
@@ -52,10 +52,10 @@
       "id": "deepseek_v4_flash",
       "provider": "deepseek",
       "enabled": false,
-      "priority": 60,
+      "priority": 999,
       "model": "deepseek-v4-flash",
       "reasoning_effort": "low",
-      "purpose": "disabled economical API route"
+      "purpose": "disabled optional economical API route"
     }
   ]
 }

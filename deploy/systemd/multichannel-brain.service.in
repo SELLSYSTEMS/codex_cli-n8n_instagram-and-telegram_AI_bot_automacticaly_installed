@@ -16,6 +16,7 @@ TimeoutStopSec=15
 KillSignal=SIGTERM
 NoNewPrivileges=true
 PrivateTmp=true
+ReadWritePaths=@@ROOT_DIR@@/.runtime
 StandardOutput=journal
 StandardError=journal
 
